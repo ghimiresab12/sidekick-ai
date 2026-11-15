@@ -98,3 +98,15 @@ For a missed/unsupported Chert capability, report the limitation and demonstrate
 - **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
+
+## Gemini reasoning feature
+
+For the independent mock reasoning demo, tests, Gemini configuration and session-engine handoff,
+see [docs/reasoning.md](docs/reasoning.md). From the repository root with Node 24+:
+
+```powershell
+node --test tests/reasoning/*.test.mjs
+node examples/reasoning-demo.mjs
+```
+
+The default demo is offline and explicitly mocked. No live Chert integration is claimed.

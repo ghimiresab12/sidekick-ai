@@ -93,3 +93,12 @@ A permissioned Chrome extension remains **a contingency only** if the verified C
 - **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
+
+## Gemini reasoning implementation
+
+The reasoning component uses TypeScript .mts modules with Node 24+ native type stripping and built-in
+fetch/node:test. Gemini generateContent REST is isolated behind a provider interface; no runtime SDK
+or validation dependency is added. GEMINI_API_KEY is server-only; GEMINI_MODEL must be explicitly set
+to a structured-output-capable model in the caller's account. No model version is assumed verified.
+Development-only TypeScript 7.0.2 and @types/node 24.19.2 match the published session-engine toolchain
+and are isolated in tools/reasoning. These choices apply to this component, not the Chert runtime.

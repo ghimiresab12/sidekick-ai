@@ -111,3 +111,10 @@ Record observed evidence, tested platform, owner, and status in issues or `engin
 - **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
+
+## Reasoning feature verification scope
+
+The Gemini reasoning feature is developed independently with synthetic normalized observations and
+mock provider responses. Its offline tests and temporary session-engine compatibility check do not
+complete the live Phase 0 gates. See docs/reasoning.md and docs/reasoning-verification.md for commands
+and recorded verification; do not treat mock output as live Gemini or Chert proof.

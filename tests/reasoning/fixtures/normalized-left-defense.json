@@ -1,0 +1,25 @@
+{
+  "now": "2026-11-14T20:00:10Z",
+  "staleAfterMs": 10000,
+  "session": {
+    "id": "mock-session-1", "status": "active", "consentGiven": true,
+    "activity": "gaming", "activityConfirmed": true, "contextRevision": 1, "captureGeneration": 1,
+    "participants": [{
+      "id": "player-alex", "displayName": "Alex", "role": "left defense",
+      "lastRoleChange": { "revision": 1, "effectiveAt": "2026-11-14T20:00:00Z", "source": "transcript", "sourceObservationId": "conversation-1" }
+    }], "goals": []
+  },
+  "observations": [
+    {
+      "id": "conversation-1", "sessionId": "mock-session-1", "captureGeneration": 1,
+      "source": "transcript", "observedAt": "2026-11-14T20:00:00Z", "receivedAt": "2026-11-14T20:00:00Z",
+      "text": "Alex is responsible for left defense."
+    },
+    {
+      "id": "screen-1", "sessionId": "mock-session-1", "captureGeneration": 1,
+      "source": "screen", "observedAt": "2026-11-14T20:00:08Z", "receivedAt": "2026-11-14T20:00:08Z",
+      "summary": "The left defensive zone is clearly visible and contains no defending players.",
+      "evidenceQuality": "clear", "facts": { "leftZoneVisible": true, "leftZoneUncovered": true }
+    }
+  ]
+}

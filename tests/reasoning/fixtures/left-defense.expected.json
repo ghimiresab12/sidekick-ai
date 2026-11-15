@@ -1,0 +1,21 @@
+{
+  "contextUpdates": [
+    {
+      "type": "role_assignment",
+      "participantId": "player-alex",
+      "role": "left defense",
+      "sourceObservationIds": ["conversation-1"]
+    }
+  ],
+  "recommendationCandidates": [
+    {
+      "fingerprint": "left_defense_uncovered",
+      "title": "Left defense appears exposed",
+      "shortAdvice": "Ask Alex to cover left defense or arrange backup coverage.",
+      "urgency": "normal",
+      "relatedParticipantIds": ["player-alex"],
+      "conditionObservationIds": ["screen-1"],
+      "contextObservationIds": ["conversation-1"]
+    }
+  ]
+}
