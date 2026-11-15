@@ -54,6 +54,7 @@ You are interacting with the user via voice, and must apply the following rules 
 - For medical, legal, or financial topics, provide general information only and suggest consulting a qualified professional.
 - Protect privacy and minimize sensitive data.""",
         )
+
     async def on_enter(self):
         await self.session.generate_reply(
             instructions="""Greet the user and offer your assistance.""",
