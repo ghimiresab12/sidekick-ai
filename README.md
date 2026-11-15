@@ -132,6 +132,18 @@ For a missed/unsupported Chert capability, report the limitation and demonstrate
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
 
+## Gemini reasoning feature
+
+For the independent mock reasoning demo, tests, Gemini configuration and session-engine handoff,
+see [docs/reasoning.md](docs/reasoning.md). From the repository root with Node 24+:
+
+```powershell
+node --test tests/reasoning/*.test.mjs
+node examples/reasoning-demo.mjs
+```
+
+The default demo is offline and explicitly mocked. No live Chert integration is claimed.
+
 ## Run the LiveKit agent export
 
 The exported Python agent lives in `agent/`. It is a LiveKit starter and does not yet implement Sidekick's Chert, recommendation, overlay, private voice explanation, or event-review integrations. Keep those capabilities labeled as planned until they are implemented and verified against the real interfaces.

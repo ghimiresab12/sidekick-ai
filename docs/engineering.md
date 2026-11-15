@@ -309,6 +309,22 @@ The **product** is locked in `requirements.md`. Internal schemas here are the **
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
 
+## Gemini reasoning boundary (feature/gemini-reasoning)
+
+The independently runnable reasoning module uses normalized ENGINE-INGESTED observations with IDs,
+session IDs, capture generations and source timestamps. It accepts a read-only session snapshot,
+engine clock and explicit staleAfterMs. It returns proposed context updates and recommendation
+candidates with separate condition/context evidence, preserving contextRevision. No state mutation,
+deduplication, lifecycle, Chert or frontend behavior is owned by reasoning. Exact quotes and local
+freshness/scope checks supplement model prompting, but do not prove semantic entailment.
+
+The published session-engine contract at 1bc0e9f1414fdb18dbcb95f4f41b79d80a0e9a88 is the integration
+reference. Structural type compatibility and real-engine acceptance are checked in a temporary copy;
+shared contracts are not overwritten. Apply context updates through engine APIs, re-read state,
+and re-evaluate if revision changes. Cancel on Pause/End and let the engine reject stale late results.
+See docs/reasoning.md for complete handoff, limitations and commands. Raw-frame ingestion and live
+Chert remain unverified; the Gemini adapter reasons over supplied summaries, not fetched frameRef media.
+
 ## Imported LiveKit Agent Builder export (2026-11-14)
 
 The Agent Builder export is integrated under `agent/`; the source and its entrypoint are preserved. Inspection of `agent/src/agent.py` shows a LiveKit `AgentServer` with an `rtc_session` entrypoint, an `AgentSession`, a `DuplexModel` configured as `openai/gpt-live-1`, and the exported ai-coustics audio enhancement hook. The package configuration declares `livekit-agents`, the ai-coustics and noise-cancellation plugins, `python-dotenv`, and `python-handlebars`; the dev group contains pytest, pytest-asyncio, and Ruff. The documented local entrypoint is `uv run python src/agent.py dev`; Docker starts `src/agent.py start`.

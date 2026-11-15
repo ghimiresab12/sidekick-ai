@@ -106,6 +106,15 @@ A permissioned Chrome extension remains **a contingency only** if the verified C
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
 
+## Gemini reasoning implementation
+
+The reasoning component uses TypeScript .mts modules with Node 24+ native type stripping and built-in
+fetch/node:test. Gemini generateContent REST is isolated behind a provider interface; no runtime SDK
+or validation dependency is added. GEMINI_API_KEY is server-only; GEMINI_MODEL must be explicitly set
+to a structured-output-capable model in the caller's account. No model version is assumed verified.
+Development-only TypeScript 7.0.2 and @types/node 24.19.2 match the published session-engine toolchain
+and are isolated in tools/reasoning. These choices apply to this component, not the Chert runtime.
+
 ### Imported LiveKit Agent Builder export
 
 The repository contains the exported Python LiveKit agent in `agent/`. Its declared shared runtime is Python 3.13 with `uv`; the existing LiveKit dependencies and source entrypoint are preserved. This is an imported starter, **not evidence that Chert FaceTime, screen-share, transcript, overlay, recommendation, private voice, or review integration works**. Keep the current Chert verification gates unchanged. The export did not include `uv.lock`, so package ranges are not yet pinned to exact versions; generate and commit the lockfile after resolving dependencies in an environment with package-index access.

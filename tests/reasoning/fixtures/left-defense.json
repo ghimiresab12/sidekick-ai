@@ -1,0 +1,25 @@
+{
+  "now": "2026-11-14T20:00:10Z",
+  "sessionId": "mock-session-1",
+  "conversationObservations": [
+    {
+      "observationId": "conversation-1",
+      "observedAt": "2026-11-14T20:00:00Z",
+      "text": "Alex is responsible for left defense."
+    }
+  ],
+  "screenObservations": [
+    {
+      "observationId": "screen-1",
+      "observedAt": "2026-11-14T20:00:08Z",
+      "summary": "The left defensive zone is clearly visible and contains no defending players.",
+      "evidenceQuality": "clear"
+    }
+  ],
+  "context": {
+    "participants": [{ "id": "player-alex", "displayName": "Alex" }],
+    "activeGroupGoals": [],
+    "confirmedActivity": "gaming",
+    "relevantObservationIds": ["conversation-1", "screen-1"]
+  }
+}
