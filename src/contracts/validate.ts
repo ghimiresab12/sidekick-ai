@@ -26,6 +26,9 @@ export const LIMITS = {
   factStringValue: 200,
   evidenceIds: 50,
   relatedIds: 20,
+  listObservationsDefault: 100,
+  listObservationsMax: 500,
+  listObservationIds: 100,
 } as const;
 
 export type Check = { ok: true } | { ok: false; error: EngineError; detail: string };
@@ -244,6 +247,30 @@ export function checkDecisionInput(input: unknown): Check {
     return fail('invalid_input', 'transcript-derived decisions require sourceObservationIds');
   }
   return OK;
+}
+
+export function checkListObservationsQuery(input: unknown): Check {
+  if (input === undefined) return OK;
+  if (!isObject(input)) return fail('invalid_input', 'query must be an object');
+  return firstFailure(
+    input.source === undefined || input.source === 'transcript' || input.source === 'screen'
+      ? OK
+      : fail('invalid_input', 'source must be transcript | screen'),
+    input.captureGeneration === undefined ||
+      (Number.isSafeInteger(input.captureGeneration) && (input.captureGeneration as number) >= 0)
+      ? OK
+      : fail('invalid_input', 'captureGeneration must be a non-negative integer'),
+    input.observedSince === undefined ? OK : checkTimestamp('observedSince', input.observedSince),
+    input.observedUntil === undefined ? OK : checkTimestamp('observedUntil', input.observedUntil),
+    input.keep === undefined || input.keep === 'newest' || input.keep === 'oldest'
+      ? OK
+      : fail('invalid_input', 'keep must be newest | oldest'),
+    checkIdList('ids', input.ids, LIMITS.listObservationIds, false),
+    input.limit === undefined ||
+      (Number.isSafeInteger(input.limit) && (input.limit as number) >= 1 && (input.limit as number) <= LIMITS.listObservationsMax)
+      ? OK
+      : fail('invalid_input', `limit must be an integer from 1 to ${LIMITS.listObservationsMax}`),
+  );
 }
 
 export function checkExplanationOptions(input: unknown): Check {

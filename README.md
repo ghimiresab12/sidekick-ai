@@ -81,14 +81,26 @@ The code in `agent/` is a generic LiveKit starter. It does not establish that Ch
 
 It has **no** Chert, Gemini, UI or speech-playback code. All inputs in tests and the demo are **mock data**. Contracts and integration points: [`docs/engineering.md`](./docs/engineering.md) §3.
 
-Requires Node.js 22 or newer; the team standard is 24 (`.nvmrc`).
+Requires Node.js 24 or newer (`.nvmrc`).
 
 ```bash
 npm install          # dev dependencies only (typescript, @types/node)
 npm run typecheck    # tsc --noEmit
 npm test             # compile + node:test suite
 npm run demo         # prints the MOCK scenario's timeline (not a live integration)
+npm run test:all     # engine + coordinator integration tests, then the reasoning tests
 ```
+
+**Coordinator (mock-only).** `SidekickCoordinator` (`src/coordinator/`) connects capture input, the engine and Prabin's reasoning module (`src/reasoning/`). Its in-process tests use only mocks.
+
+Two Gemini pieces are easy to confuse:
+
+| Piece | Status | What it does |
+|---|---|---|
+| **Gemini reasoning adapter** (`src/adapters/model/gemini.mts`, Prabin) | **Implemented and live smoke-tested.** One synthetic normalized request to `gemini-3.5-flash-lite` succeeded (see `docs/reasoning-verification.md`). That proves transport and output validation on one fixture only. It does not verify production accuracy, latency or quotas. | Sends *text* to Gemini (screen summaries, structured facts, transcripts) and returns proposed context updates and recommendation candidates. It never receives images. |
+| **Gemini raw-frame vision adapter** | **Missing.** Not implemented by anyone yet. | Would turn a shared-screen **image** into a screen summary plus structured facts. The coordinator only defines the proposed `VisionPort` interface; tests use a mock that decodes a JSON "image".
+
+**Still unverified live:** raw-frame Gemini vision (not built) and the full Sidekick pipeline (Chert → agent → coordinator → Gemini → overlay). The coordinator's own tests use only mocks. No HTTP bridge or Python agent integration exists yet, and the companion UI (`overlay/`) runs on mock data and is not yet connected to the engine. See `docs/engineering.md` "Integration milestone 1".
 
 ## Start here (team and coding assistants)
 
@@ -143,6 +155,8 @@ node examples/reasoning-demo.mjs
 ```
 
 The default demo is offline and explicitly mocked. No live Chert integration is claimed.
+
+This section covers the **reasoning** adapter, which works on text. It does **not** cover the raw-frame **vision** adapter, which is still missing. Screen summaries must already exist before reasoning can use them; see the table in "Session engine" above.
 
 ## Run the LiveKit agent export
 

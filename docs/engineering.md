@@ -341,3 +341,108 @@ still enforces both. A full live request returned one evidence-linked candidate 
 quote coverage for condition and context evidence is explicitly prompted and locally verified. This
 is a one-fixture Gemini transport/validation proof only; Chert, raw vision and overall accuracy remain
 unverified. See docs/reasoning-verification.md for the distinction from earlier mock-only results.
+
+## Integration milestone 1 — coordinator (implemented 2026-11-14, mock-only)
+
+**Status:** implemented and tested **in-process with mocks only**:
+- the real engine;
+- the real reasoning module (`src/reasoning`) with its deterministic mock provider;
+- a mock vision adapter;
+- a fake clock and timers.
+
+No HTTP server, Python agent change, Gemini call, Chert call or UI exists yet.
+
+### Components
+
+| File | Role |
+|---|---|
+| `src/engine.ts` → `listObservations(sessionId, query?)` | Read-only, bounded observation query. Filters `source`, `captureGeneration`, `observedSince`, `observedUntil` and `ids` (≤100), ANDed. `limit` is 1–500 (default 100) and keeps the newest matches, or the oldest with `keep: 'oldest'`. Results are ordered by source time. No sweep, no events, no overlay version bump. |
+| `src/coordinator/ports.ts` | Structural ports: `ReasoningFn` (matches Prabin's `reason()`), the **proposed** `VisionPort` (`FrameInput` → `ScreenDescription`), `CoordinatorResult` and content-free `CoordinatorDiagnostic` codes. |
+| `src/coordinator/select-observations.ts` | Builds the reasoning batch (≤100) in priority order: (1) source utterances of current roles and active goals, at any age or generation; (2) every current-generation screen inside `staleAfterMs`; (3) recent transcripts (60 s window, newest 30), with the oldest dropped first. Future-stamped items are excluded individually. Limits are validated at construction (`maxBatch` ≤ `REASONING_MAX_OBSERVATIONS` = 100). It also provides `findSupersedingScreen`. |
+| `src/coordinator/coordinator.ts` | `SidekickCoordinator`. It creates the engine with **its own clock**, so the engine and reasoning share one `now`. It holds only transient task state; the engine remains the single owner of session state. |
+| `tests/integration/reasoning-wiring.mts` | Adapts the real `reason()` to `ReasoningFn`. The integration test loads it at runtime, and `npm run typecheck` (via `tsconfig.reasoning-compat.json`) type-checks it, so a contract drift on either side fails the type check. |
+
+### Asynchronous rules
+
+- **Capture generation:** `ingestFrame` snapshots the capture-time `captureGeneration` and `observedAt` **before** awaiting vision, and carries them unchanged into `ingestScreen`. The input object is never re-read after an await, and vision receives a copy. Frames from an earlier generation are not sent to vision at all (`stale_evidence`). If a pause happens while vision is running, its result is dropped (`aborted`).
+- **Context revision:** each run records the snapshot's `contextRevision` and generation, then re-reads the engine after the reasoning await. The result is discarded if:
+  - the session is gone;
+  - the session is not active;
+  - the generation moved;
+  - the output's `sessionId`, revision or generation don't match what was sent;
+  - roles or goals changed during the call. In this case reasoning re-runs instead of relabelling the old candidates.
+
+  After applying context proposals, if the revision changed, that batch's candidates are dropped and reasoning re-runs, as `docs/reasoning.md` requires. An engine `stale_context` rejection also triggers a rerun. Reruns caused by context or evidence changes are capped at 3 per trigger (`maxReruns`).
+- **Superseded condition evidence (added after review):** before each candidate is proposed, the coordinator looks for a current-generation screen with all of these properties:
+  - not in the reasoning batch;
+  - already eligible (`observedAt ≤ now`);
+  - at least as new as the batch's newest screen;
+  - **not equivalent** to it (`framesEquivalent`, revised after the second review). Two frames are equivalent only if both are `clear` quality and one of these holds:
+    - their summaries are identical (ignoring case and whitespace) **and** their facts are identical, with "no facts" or empty facts on both counting as identical;
+    - every key in the coordinator's `conditionFactKeys` option is present on **both** frames with equal values. These keys are the structured condition the rule depends on (MVP: `leftZoneVisible`, `leftZoneUncovered`), and the default is `[]`.
+
+    Matching partial or generic facts (e.g. only `leftZoneVisible`) never make differing summaries equivalent. The coordinator never interprets summary text and never assumes model-generated facts are complete.
+
+  If such a screen exists, the candidates are discarded (`evidence_superseded`) and reasoning re-runs on current evidence. This is conservative by design:
+  - unknown or partial quality always counts as superseding, and so do differing summaries without complete condition facts;
+  - transcripts never supersede condition evidence;
+  - older late frames don't supersede;
+  - existing recommendations, including unrelated ones, are never invalidated by this check. It only stops new candidates from a result that is out of date.
+
+  Equivalent frames don't trigger it, so a steady stream of frames showing the same condition doesn't starve advice. **Wiring requirement:** with live Gemini vision, summaries will vary in wording from frame to frame. The production wiring should therefore set `conditionFactKeys` to the facts the vision adapter guarantees. Otherwise every newer frame supersedes, and advice may never appear while frames keep arriving.
+- **Idempotent context application:** checks are made against **current engine state**, re-read before **each** proposal, with no shadow copy. Duplicate proposals in the same response are therefore applied once, and distinct ones are all kept:
+  - the same role from the same utterance is not re-applied;
+  - a goal with the same text and source is not re-created, even if it was retired;
+  - a decision with the same text and sources is not re-recorded;
+  - activity is not re-suggested after the group confirms one.
+
+  Every role and goal is applied with `source: 'transcript'` and its source utterance, so the engine's precedence rules still decide.
+- **Lifecycle and reentrancy (revised after review):** each active stretch of a session (start or resume, until pause, end or discard) is a **period** with its own `AbortController` and deadline timer.
+  - `pause` and `end` abort **the period that was current before the call**, then re-sync with the engine's actual status. A period created by a subscriber that resumes the session from inside the pause notification is therefore never aborted.
+  - Lifecycle changes made directly on the engine are picked up through a subscription.
+  - A run is revalidated before **every** engine write. The checks: same task, same non-aborted period, session still active, same generation. A subscriber that pauses, ends or discards during context application stops all further writes from that run.
+- **Concurrency:** at most one reasoning run per session. Triggers during a run coalesce into a single rerun.
+- **Diagnostics:** codes only. They never contain transcript text, summaries, frames or provider messages.
+
+### Timestamp tolerance (handled at the boundary; contract change proposed)
+
+The engine admits `observedAt` up to `maxClockSkewMs` (5 s) ahead of its clock. Reasoning rejects the **entire batch** if any observation is in the future (`invalid_input`).
+
+**Current handling, with no change to reasoning (revised after review):**
+- Future-stamped observations are left out of the batch **individually**. Every selection query asks only for already-eligible observations (`observedUntil: now`) **before** limits such as `maxScreens` are applied, so a high-frequency stream of future-stamped frames can't crowd eligible evidence out (revised after the second review). Everything eligible is reasoned over immediately, with no added latency. A separate one-row query (`keep: 'oldest', limit: 1`) finds the earliest future observation for the deadline.
+- The coordinator keeps one deadline per period, at the **earliest** excluded `observedAt`. A later future frame never pushes it back, and repeated triggers don't re-create it. When the deadline fires, reasoning runs with that evidence included.
+- With a producer whose clock runs constantly ahead, advice therefore reflects frames up to `maxClockSkewMs` older than the newest received. Future frames are not yet eligible, so they also don't count as superseding.
+
+**Proposed for Prabin's approval (smallest change):** add an optional `maxClockSkewMs` to `ReasoningInput`, defaulting to `0` (today's behaviour). The future-evidence check would become `observedAt > now + maxClockSkewMs`, and freshness rules would be unchanged. The coordinator would pass `engine.config.maxClockSkewMs`, and the per-item exclusion and its skew-sized lag would no longer be needed. Until that is approved, reasoning behaviour is untouched.
+
+### Proposed vision interface (for Prabin's approval)
+
+Frame admission is checked before invoking vision: timestamps must parse with the shared
+strict ISO parser and fall between session start minus configured clock skew and the
+current engine clock plus that skew. The engine still validates the final observation
+after vision completes. Capture generation and timestamps are preserved, not rewritten.
+Invalid frames must cause zero vision calls. The clock-wait workaround remains unchanged.
+`maxFrameBytes` must be a safe integer from 1 through 5 MiB (5,242,880 bytes), with
+5 MiB as the default and hard ceiling; callers may configure a smaller budget.
+
+`VisionPort.describe(frame: FrameInput, signal) → Promise<ScreenDescription>`:
+- `FrameInput = { captureGeneration, observedAt, image: Uint8Array, mimeType }`, held in memory only and never stored or logged.
+- `ScreenDescription = { summary, evidenceQuality, facts? }`, where `facts` should include `leftZoneVisible` and `leftZoneUncovered` for the MVP rule.
+
+The engine validates the description on ingest. It is not implemented; tests use a mock.
+
+### How the Python agent will connect (next milestone, not implemented)
+
+The Python LiveKit agent will POST normalized events to an authenticated localhost HTTP bridge, which calls the coordinator. It will **not** call the engine directly. The flow:
+1. **Session:** on job start, `createSession({ externalRef: <room name> })`. Lifecycle (start, pause, resume, end) comes from the companion UI, not from the agent.
+2. **Generation:** the agent reads `captureGeneration` from the bridge at the moment it captures input, and sends it with that input.
+3. **Transcripts:** speech-to-text events become `ConversationInput { captureGeneration, observedAt, text, speakerRef? }` and go to `ingestConversation`.
+4. **Frames:** a sampled screen-share frame becomes `FrameInput` bytes plus generation and time, and goes to `ingestFrame`. The bridge passes them to vision in memory only.
+5. **Speech output:** none. The agent publishes no audio, except one connection greeting if a real call proves Chert requires it.
+
+### Remaining unknowns
+
+- The exact LiveKit APIs for speech-to-text events, screen-share track subscription and frame encoding are unverified.
+- Chert's handling of screen share is unverified; its starter page mentions only camera tracks.
+- Whether the greeting is mandatory is unverified (Damius, real call).
+- Gemini latency for vision plus reasoning within the stale window is unmeasured.

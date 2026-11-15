@@ -26,6 +26,7 @@ import type {
   GoalRetireResult,
   GroupDecision,
   GroupGoal,
+  ListObservationsQuery,
   Observation,
   ObservationSource,
   OverlayListener,
@@ -57,6 +58,7 @@ import {
   checkCreateSessionOptions,
   checkDecisionInput,
   checkExplanationOptions,
+  checkListObservationsQuery,
   checkParticipantInput,
   checkScreenInput,
   isActivity,
@@ -567,6 +569,35 @@ export class SidekickEngine {
     return this.#withSession(sessionId, (s) => {
       const stored = s.observations.get(observationId);
       return stored ? ok(clone(stored.observation)) : err('evidence_not_found');
+    });
+  }
+
+  /**
+   * Read-only, bounded view of stored observations, ordered by **source time**
+   * (oldest first; ties keep arrival order). When more match than `limit`, the newest
+   * `limit` are returned, or the oldest with `keep: 'oldest'`. No side effects: no sweep,
+   * no events, no overlay version bump.
+   */
+  listObservations(sessionId: string, query?: ListObservationsQuery): Result<Observation[]> {
+    return this.#withSession(sessionId, (s) => {
+      const check = checkListObservationsQuery(query);
+      if (!check.ok) return fromCheck(check);
+      const q = query ?? {};
+      const sinceMs = q.observedSince === undefined ? undefined : parseIsoTime(q.observedSince);
+      const untilMs = q.observedUntil === undefined ? undefined : parseIsoTime(q.observedUntil);
+      const ids = q.ids === undefined ? undefined : new Set(q.ids);
+      const limit = q.limit ?? LIMITS.listObservationsDefault;
+      const matches = [...s.observations.values()]
+        .map((stored, index) => ({ stored, index }))
+        .filter(({ stored: { observation: o, observedAtMs } }) =>
+          (q.source === undefined || o.source === q.source) &&
+          (q.captureGeneration === undefined || o.captureGeneration === q.captureGeneration) &&
+          (sinceMs === undefined || observedAtMs >= sinceMs) &&
+          (untilMs === undefined || observedAtMs <= untilMs) &&
+          (ids === undefined || ids.has(o.id)))
+        .sort((a, b) => a.stored.observedAtMs - b.stored.observedAtMs || a.index - b.index);
+      const kept = q.keep === 'oldest' ? matches.slice(0, limit) : matches.slice(-limit);
+      return ok(kept.map((m) => clone(m.stored.observation)));
     });
   }
 

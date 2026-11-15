@@ -36,7 +36,7 @@
 
 | Item | Choice | Notes |
 |---|---|---|
-| Node.js | **24 LTS** as the team standard (`.nvmrc`). Supported floor is **22** (`"engines": { "node": ">=22" }`) | Tests verified on Node 22.23, 24.22 and 26.13. A future Docker image should use a `node:24` base, which no file pins yet. |
+| Node.js | **24 LTS** as the team standard (`.nvmrc`) and the **supported floor** (`"engines": { "node": ">=24" }`, raised from 22 on 2026-11-14) | Reasoning `.mts` modules run via Node's built-in type stripping and are loaded at runtime by the integration tests; `docs/reasoning.md` already required Node 24. A future Docker image should use a `node:24` base. |
 | TypeScript | `typescript@7.0.2` (dev dependency, exact pin) | `strict`, `NodeNext` modules, ES2022 target. Compiled with `tsc` to `dist/`, so we don't rely on any Node version's built-in type stripping. |
 | Node types | `@types/node@24.19.2` (dev dependency, exact pin) | Matches the Node 24 standard. |
 | Runtime dependencies | **None** | The engine uses only `node:crypto` (`randomUUID`) and built-in `structuredClone`. |
@@ -142,3 +142,9 @@ The repository contains the exported Python LiveKit agent in `agent/`. Its decla
 The configured gemini-3.5-flash-lite model successfully handled one synthetic normalized-observation
 reasoning request using generateContent structured JSON. Model selection remains an explicit server
 environment setting, not a hardcoded default. This test does not establish production quality or quotas.
+
+### Integration milestone 1 tooling (2026-11-14)
+
+- `npm run typecheck` now runs two checks: `tsc -p tsconfig.json --noEmit` (engine, coordinator, tests) and `tsc -p tsconfig.reasoning-compat.json`. The second type-checks Prabin's `.mts` reasoning modules together with `tests/integration/reasoning-wiring.mts`, without emitting or modifying them.
+- `npm run test:all` runs the compiled engine and integration suite (`npm test`) and then the reasoning suite (`npm run test:reasoning`).
+- No new dependencies.
