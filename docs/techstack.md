@@ -93,3 +93,7 @@ A permissioned Chrome extension remains **a contingency only** if the verified C
 - **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
+
+### Imported LiveKit Agent Builder export
+
+The repository contains the exported Python LiveKit agent in `agent/`. Its declared shared runtime is Python 3.13 with `uv`; the existing LiveKit dependencies and source entrypoint are preserved. This is an imported starter, **not evidence that Chert FaceTime, screen-share, transcript, overlay, recommendation, private voice, or review integration works**. Keep the current Chert verification gates unchanged. The export did not include `uv.lock`, so package ranges are not yet pinned to exact versions; generate and commit the lockfile after resolving dependencies in an environment with package-index access.
