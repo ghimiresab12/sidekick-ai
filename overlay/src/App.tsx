@@ -1,111 +1,146 @@
 /**
- * Composition root. The only place that wires the data source, session state
- * and voice together, and that enforces the cross-cutting rules:
- *   - speech stops on dismiss (that card), pause, end and discard;
+ * Composition root. The only place that wires the backend, session state and voice
+ * together, and that enforces the cross-cutting rules:
+ *   - speech stops on dismiss (that card), pause, end, discard, connection loss,
+ *     and whenever the engine's `activeVoiceRequest` ends our request;
  *   - End and Discard require confirmation;
- *   - screens follow the session lifecycle.
+ *   - screens follow the session lifecycle and connection health.
  *
- * To integrate with a real backend, swap `createMockDataSource` for a live
- * SidekickDataSource here; components do not change.
+ * The backend is chosen in `createBackend()`. Components never import one.
  */
 import { useEffect, useState } from 'react';
+import { createInProcessBackend } from './backend/inProcessBackend';
+import { errorMessage, type SidekickBackend } from './backend/SidekickBackend';
+import { BackendBanner, DemoControls } from './components/BackendBanner';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConsentScreen } from './components/ConsentScreen';
 import { EndSessionPanel } from './components/EndSessionPanel';
 import { LiveScreen } from './components/LiveScreen';
-import { MockBanner, MockControls } from './components/MockBanner';
 import { SessionReview } from './components/SessionReview';
-import { ActionErrorBanner, DiscardedScreen, LoadErrorScreen, LoadingScreen } from './components/StateScreens';
-import seed from './data/mock-session.json';
-import { createMockDataSource, type MockDataSource } from './data/mockDataSource';
+import {
+  ActionErrorBanner,
+  ConnectionBanner,
+  DiscardedScreen,
+  LoadingScreen,
+  UnavailableScreen,
+} from './components/StateScreens';
 import { useSidekickSession } from './session/useSidekickSession';
 import { useVoiceExplanation } from './voice/useVoiceExplanation';
 
-interface Instance {
-  n: number;
-  dataSource: MockDataSource;
+/**
+ * Today: the in-process backend (real engine + coordinator + reasoning, synthetic
+ * input). The HTTP/SSE bridge adapter plugs in here once the bridge is on main.
+ */
+function createBackend(): SidekickBackend {
+  return createInProcessBackend();
 }
 
-const createInstance = (n: number): Instance => ({
-  n,
-  dataSource: createMockDataSource(seed, { sessionId: `mock-session-${n}` }),
-});
+interface Instance {
+  n: number;
+  backend: SidekickBackend;
+}
 
 export function App() {
-  const [instance, setInstance] = useState(() => createInstance(1));
+  const [instance, setInstance] = useState<Instance>(() => ({ n: 1, backend: createBackend() }));
   // `key` remounts everything for a new session, so no state leaks between sessions.
   return (
     <SidekickApp
       key={instance.n}
-      dataSource={instance.dataSource}
-      onRestart={() => setInstance((prev) => createInstance(prev.n + 1))}
+      backend={instance.backend}
+      onRestart={() => setInstance((prev) => ({ n: prev.n + 1, backend: createBackend() }))}
     />
   );
 }
 
-function SidekickApp({ dataSource, onRestart }: { dataSource: MockDataSource; onRestart: () => void }) {
-  const session = useSidekickSession(dataSource);
+function SidekickApp({ backend, onRestart }: { backend: SidekickBackend; onRestart: () => void }) {
+  const session = useSidekickSession(backend);
   const [simulateNoSpeech, setSimulateNoSpeech] = useState(false);
-  const voice = useVoiceExplanation(dataSource, { simulateUnavailable: simulateNoSpeech });
+  const voice = useVoiceExplanation(backend, { simulateUnavailable: simulateNoSpeech });
   const [confirm, setConfirm] = useState<'end' | 'discard' | null>(null);
+  const [advancing, setAdvancing] = useState(false);
 
-  const { state } = session;
-  const snapshot = state.snapshot;
-  const status = snapshot?.session.status;
-  const { stop: stopVoice } = voice;
+  const { state, live } = session;
+  const overlay = state.overlay;
+  const status = overlay?.status;
+  const activeVoiceRequest = overlay?.activeVoiceRequest;
+  const { syncActiveRequest, silenceForLifecycle } = voice;
 
-  // Safety net: speech never continues outside an active session, however the
-  // status changed. (Handlers below also stop it explicitly, first.)
+  // The engine is the authority on whether our voice request is still live.
   useEffect(() => {
-    if (status !== 'active') stopVoice();
-  }, [status, stopVoice]);
+    syncActiveRequest(activeVoiceRequest);
+  }, [activeVoiceRequest, syncActiveRequest]);
 
-  const handlePause = () => {
-    voice.stop();
-    void session.pause();
+  // Safety net: speech never continues outside an active, connected session. The
+  // engine records its own cancel reason (pause/end), so nothing is reported here.
+  useEffect(() => {
+    if (status !== 'active' || !live) silenceForLifecycle();
+  }, [status, live, silenceForLifecycle]);
+
+  const leaveActive = async (op: () => Promise<boolean>) => {
+    const requestId = voice.silenceForLifecycle();
+    const ok = await op();
+    // If the lifecycle call failed, the engine still holds our request: cancel it.
+    if (!ok && requestId) voice.cancelOnBackend(requestId);
   };
   const handleDismiss = (id: string) => {
-    voice.stopIfFor(id);
+    voice.stopIfFor(id); // user action → cancelExplanation(reason user)
     void session.dismiss(id);
-  };
-  const handleConfirmEnd = () => {
-    setConfirm(null);
-    voice.stop();
-    void session.end();
   };
   const handleConfirmDiscard = () => {
     setConfirm(null);
     voice.reset();
     void session.discard();
   };
+  const handleAdvance = async () => {
+    if (!backend.simulation) return;
+    setAdvancing(true);
+    try {
+      await backend.simulation.advance();
+    } catch (e) {
+      session.showError(errorMessage(e));
+    } finally {
+      setAdvancing(false);
+    }
+  };
 
   let screen: JSX.Element;
   let wide = false;
   if (state.discarded) {
     screen = <DiscardedScreen onRestart={onRestart} />;
-  } else if (!snapshot && state.loadStatus === 'loading') {
+  } else if (!overlay && state.connection === 'unavailable') {
+    screen = <UnavailableScreen detail={state.connectionDetail} onRetry={session.reconnect} />;
+  } else if (!overlay) {
     screen = <LoadingScreen />;
-  } else if (!snapshot) {
-    screen = <LoadErrorScreen message={state.loadError ?? 'Unknown error.'} onRetry={session.retryLoad} />;
-  } else if (snapshot.session.status === 'starting') {
-    screen = <ConsentScreen session={snapshot.session} starting={state.pending === 'start'} onStart={() => void session.start()} />;
-  } else if (snapshot.session.status === 'ended') {
+  } else if (overlay.status === 'starting') {
+    screen = (
+      <ConsentScreen
+        overlay={overlay}
+        syntheticInput={backend.label.syntheticInput}
+        starting={state.pending === 'start'}
+        disabled={!live}
+        onStart={() => void session.start()}
+      />
+    );
+  } else if (overlay.status === 'ended') {
     if (state.review.status === 'ready') {
       wide = true;
       screen = (
         <SessionReview
-          snapshot={snapshot}
+          overlay={overlay}
+          timeline={state.review.timeline}
           review={state.review.data}
           discarding={state.pending === 'discard'}
+          disabled={!live}
           onRequestDiscard={() => setConfirm('discard')}
         />
       );
     } else {
       screen = (
         <EndSessionPanel
-          snapshot={snapshot}
+          overlay={overlay}
           review={state.review}
           discarding={state.pending === 'discard'}
+          disabled={!live}
           onGenerateReview={() => void session.generateReview()}
           onRequestDiscard={() => setConfirm('discard')}
         />
@@ -114,12 +149,14 @@ function SidekickApp({ dataSource, onRestart }: { dataSource: MockDataSource; on
   } else {
     screen = (
       <LiveScreen
-        snapshot={snapshot}
+        overlay={overlay}
+        live={live}
+        syntheticInput={backend.label.syntheticInput}
         selectedId={state.selectedRecommendationId}
         pending={state.pending}
         allowed={session.allowed}
         voice={voice}
-        onPause={handlePause}
+        onPause={() => void leaveActive(session.pause)}
         onResume={() => void session.resume()}
         onRequestEnd={() => setConfirm('end')}
         onDismiss={handleDismiss}
@@ -130,18 +167,24 @@ function SidekickApp({ dataSource, onRestart }: { dataSource: MockDataSource; on
 
   return (
     <div className="app">
-      {dataSource.mode === 'mock' && <MockBanner />}
+      <BackendBanner label={backend.label} />
       <main className={wide ? 'main main-wide' : 'main'}>
+        {!state.discarded && overlay && (
+          <ConnectionBanner status={state.connection} detail={state.connectionDetail} onRetry={session.reconnect} />
+        )}
         {state.actionError && !state.discarded && (
           <ActionErrorBanner message={state.actionError} onClose={session.clearError} />
         )}
         {screen}
       </main>
-      {dataSource.mode === 'mock' && !state.discarded && (
+      {!state.discarded && (
         <footer className="footer">
-          <MockControls
-            controls={dataSource.mock}
+          <DemoControls
+            simulation={backend.simulation}
             status={status}
+            live={live}
+            advancing={advancing}
+            onAdvance={() => void handleAdvance()}
             simulateNoSpeech={simulateNoSpeech}
             onSimulateNoSpeechChange={setSimulateNoSpeech}
           />
@@ -152,7 +195,10 @@ function SidekickApp({ dataSource, onRestart }: { dataSource: MockDataSource; on
         open={confirm === 'end'}
         title="End this session?"
         confirmLabel="End session"
-        onConfirm={handleConfirmEnd}
+        onConfirm={() => {
+          setConfirm(null);
+          void leaveActive(session.end);
+        }}
         onCancel={() => setConfirm(null)}
       >
         <p>

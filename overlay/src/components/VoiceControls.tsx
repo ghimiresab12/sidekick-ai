@@ -1,13 +1,12 @@
 import { useId } from 'react';
-import type { RecommendationWithContext } from '../contracts/proposed';
-import type { SessionStatus } from '../contracts/sidekick';
+import type { RecommendationView } from '../contracts/shared';
 import type { VoiceApi } from '../voice/useVoiceExplanation';
 import type { VoiceStatus } from '../voice/voiceController';
 
 interface Props {
-  rec: RecommendationWithContext;
+  rec: RecommendationView;
+  live: boolean;
   voice: VoiceApi;
-  sessionStatus: SessionStatus;
 }
 
 const STATUS_TEXT: Record<VoiceStatus, string> = {
@@ -21,18 +20,20 @@ const STATUS_TEXT: Record<VoiceStatus, string> = {
 
 /**
  * Explain with voice / Stop voice for ONE recommendation (scoped by id).
- * Sound only ever starts from this button press — never on card creation.
+ * Sound only ever starts from this button press, never on card creation.
+ * Whether Explain is offered is the ENGINE's decision (`RecommendationView.canExplain`).
  */
-export function VoiceControls({ rec, voice, sessionStatus }: Props) {
+export function VoiceControls({ rec, live, voice }: Props) {
   const noteId = useId();
   const mine = voice.state.recommendationId === rec.id;
   const status: VoiceStatus = mine ? voice.state.status : 'idle';
-  const canExplain = sessionStatus === 'active' && !voice.busy;
+  const canExplain = live && rec.canExplain && !voice.busy;
   const canStop = mine && voice.busy;
 
   let hint: string | null = null;
-  if (sessionStatus !== 'active') hint = 'Voice explanations are available while Sidekick is observing.';
+  if (!live) hint = 'Reconnect to the Sidekick service to request an explanation.';
   else if (voice.busy && !mine) hint = 'Another explanation is playing. Stop it first.';
+  else if (!rec.canExplain && !mine) hint = 'Voice explanations are available for open advice while Sidekick is observing.';
 
   return (
     <section className="voice" aria-label="Voice explanation">
@@ -54,7 +55,7 @@ export function VoiceControls({ rec, voice, sessionStatus }: Props) {
 
       <p className={`voice-status voice-${status}`} aria-live="polite">
         {STATUS_TEXT[status]}
-        {mine && voice.state.explanation?.refersToEarlierObservation && status === 'speaking'
+        {mine && voice.state.script?.refersToEarlierObservation && status === 'speaking'
           ? ' (about an earlier observation)'
           : ''}
       </p>

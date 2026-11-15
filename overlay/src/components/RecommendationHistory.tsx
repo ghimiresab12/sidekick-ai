@@ -1,9 +1,9 @@
-import type { RecommendationWithContext } from '../contracts/proposed';
+import type { RecommendationView } from '../contracts/shared';
 import { isOpen } from '../session/selectors';
-import { formatClock, REC_STATUS_LABEL } from '../ui/format';
+import { formatClock, REC_STATUS_LABEL, VOICE_REQUEST_LABEL } from '../ui/format';
 
 interface Props {
-  items: RecommendationWithContext[];
+  items: RecommendationView[];
   onShow: (id: string) => void;
 }
 
@@ -25,6 +25,7 @@ export function RecommendationHistory({ items, onShow }: Props) {
                 <span className="history-meta">
                   {REC_STATUS_LABEL[r.status]} · shown {formatClock(r.createdAt)}
                   {r.urgency === 'important' ? ' · Important' : ''}
+                  {r.voice ? ` · ${VOICE_REQUEST_LABEL[r.voice.status]}` : ''}
                 </span>
               </div>
               {isOpen(r) && (
