@@ -22,15 +22,27 @@
 | Main language | **TypeScript + Node.js**, if compatible with Chert starter | Shared schemas/types across agent, logic and UI | Starter inspected |
 | Chert integration | Official Chert agent runtime/SDK | FaceTime lifecycle and incoming media | Actual examples run |
 | Multimodal model | **Gemini** behind a model-neutral adapter | Screen+conversation reasoning; Dami's candidate | Credentials, latency and image input tested |
-| Session state | In-memory Map keyed by session ID | Minimal setup, enough for a live demo | Contracts defined |
-| Validation | Zod or starter's existing schema library | Validate context/events/AI output | Avoid duplicate dependency |
+| Session state | In-memory Map keyed by session ID | Minimal setup, enough for a live demo | **Implemented** (`SidekickEngine`, mock inputs only) |
+| Validation | Hand-written guards in `src/contracts/validate.ts` for now; Zod or the starter's schema library later if needed | Validate context/events/AI output | Avoid duplicate dependency; revisit once starter is inspected |
 | Text UI | Minimal local overlay / companion panel | Fast advice display and button interaction | Desktop platform and overlay feasibility tested |
 | UI tools | Existing starter web stack; simple HTML/React as needed | Minimal dependencies | Chert/output constraints known |
-| Tests | `node:test` or existing starter test runner | Test rule engine, dedup and debrief | App scaffold finalized |
+| Tests | `node:test` (built in) on `tsc`-compiled output; adopt the starter's runner if it has one | Test rule engine, dedup and debrief; no test dependency | **In use** for the session engine (`npm test`) |
 | Hosting | Local running server/tunnel or host only as required by Chert | Keep real call integration reliable | Callback connectivity verified |
 | Logging | Minimal structured debug/event logs | See pipeline without retaining raw media | Privacy requirements met |
 
 **AI coding assistants (Claude Code, Codex, Cursor) are development tools, not the in-app inference provider.** Gemini is a **proposed** runtime choice, not proof of integration.
+
+### 2.1 Node.js and TypeScript toolchain (session engine, 2026-11-14)
+
+| Item | Choice | Notes |
+|---|---|---|
+| Node.js | **24 LTS** as the team standard (`.nvmrc`). Supported floor is **22** (`"engines": { "node": ">=22" }`) | Tests verified on Node 22.23, 24.22 and 26.13. A future Docker image should use a `node:24` base, which no file pins yet. |
+| TypeScript | `typescript@7.0.2` (dev dependency, exact pin) | `strict`, `NodeNext` modules, ES2022 target. Compiled with `tsc` to `dist/`, so we don't rely on any Node version's built-in type stripping. |
+| Node types | `@types/node@24.19.2` (dev dependency, exact pin) | Matches the Node 24 standard. |
+| Runtime dependencies | **None** | The engine uses only `node:crypto` (`randomUUID`) and built-in `structuredClone`. |
+| Scripts | `npm run typecheck`, `npm test` (build + `node --test`), `npm run demo` (mock scenario) | `dist/` is git-ignored. |
+
+If the Chert starter turns out to use a different runtime, keep `src/contracts/` as the schema reference and call the engine across a local process boundary rather than rewriting it.
 
 ## 3. Architecture boundary
 
@@ -102,3 +114,7 @@ or validation dependency is added. GEMINI_API_KEY is server-only; GEMINI_MODEL m
 to a structured-output-capable model in the caller's account. No model version is assumed verified.
 Development-only TypeScript 7.0.2 and @types/node 24.19.2 match the published session-engine toolchain
 and are isolated in tools/reasoning. These choices apply to this component, not the Chert runtime.
+
+### Imported LiveKit Agent Builder export
+
+The repository contains the exported Python LiveKit agent in `agent/`. Its declared shared runtime is Python 3.13 with `uv`; the existing LiveKit dependencies and source entrypoint are preserved. This is an imported starter, **not evidence that Chert FaceTime, screen-share, transcript, overlay, recommendation, private voice, or review integration works**. Keep the current Chert verification gates unchanged. The export did not include `uv.lock`, so package ranges are not yet pinned to exact versions; generate and commit the lockfile after resolving dependencies in an environment with package-index access.
