@@ -1,7 +1,7 @@
 # Sidekick AI — Instructions for AI Coding Assistants
 
 **Project:** Four-developer HackUTA 2026 Chert FaceTime entry.  
-**Product:** Proactive **quiet text recommendations** grounded in group conversation plus shared screen; **voice explanation only when a selected recommendation's button is pressed**; **event-based review** at session end. Gaming is the hackathon MVP; broader group activities are future applications.
+**Product:** Proactive **quiet text recommendations** grounded in group conversation plus shared screen; **private local voice explanation only to the user pressing a selected recommendation's button**; **event-based review** at session end. Gaming is the hackathon MVP; broader group activities are future applications.
 
 **This file routes you to the specifications; it is not a replacement for them.** Use these rules in Claude Code, Codex, Cursor or any other assistant. If your tool ignores `CLAUDE.md`, paste this content into its project instructions.
 
@@ -18,7 +18,7 @@
 
 - FaceTime through Chert, group context, screen observations, continuous consented audio processing during an active session.
 - Proactive recommendations are **text in a visible overlay**, not auto-spoken warnings. No constant verbal interruption.
-- **Explain with voice** acts on the **selected** recommendation and its stored evidence; after one explanation, output returns to quiet text.
+- **Explain with voice** acts on the **selected** recommendation and its stored evidence; it plays **locally and privately on the requester’s device** (headphones recommended), never through shared FaceTime audio. After one explanation, return to quiet text.
 - Activity is **detected/suggested automatically and confirmed by the users**; gaming is the only required hackathon mode.
 - Session review uses **stored events**, not hallucinated scores, claims, or retrospective telemetry.
 - Continuous observation is active-session-only. Stop/pause and visible status are essential. No indefinite private recordings.
@@ -57,3 +57,11 @@
 ## Practical first assignment
 
 Get a real Chert FaceTime session running and log **the actual shape** of incoming screen observations and transcript events; confirm the agent can speak in the same call. Record these findings in `docs/engineering.md` without recording private raw media in source control.
+
+## Decision update — private explanation (confirmed 2026-11-14)
+
+- **Who hears it:** Only the participant who clicked **Explain with voice** on a selected recommendation.
+- **Where it plays:** Locally on that participant’s companion device, preferably through headphones. No TTS audio may be published into the FaceTime/LiveKit room or shared Chert call. If speakers are used, acoustic microphone pickup can still leak audio; test and warn.
+- **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
+- **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
+- **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.

@@ -1,14 +1,14 @@
 # Sidekick AI — Overlay and Review UX Specification
 
 **Status:** Agreed user experience; implementation route pending Chert/desktop-platform verification.  
-**Scope:** Minimal overlay for gaming, click-to-explain voice, and session debrief. No full dashboard, no separate iMessage UI or login for MVP.
+**Scope:** Minimal overlay for gaming, private local click-to-explain voice, and session debrief. No full dashboard, no separate iMessage UI or login for MVP.
 
 ## 1. Design principles
 
 - **Gameplay first:** Short and unobtrusive advice; never cover essential game information.
 - **Quiet by default:** Sidekick can continuously process consented input and show cards, but **never speaks automatically**.
 - **Grounded and transparent:** Each recommendation is tied to observed context; show when it was observed and when it is uncertain/stale.
-- **One clear action:** Click **Explain with voice** on an individual card to hear details. No voice wake-word or accidental auto-speech required.
+- **One clear action:** Click **Explain with voice** on an individual card to hear details **privately on the requester’s device**, not through FaceTime. No voice wake-word or accidental auto-speech required.
 - **User control:** Monitoring status, Pause/Resume, Stop, Dismiss, End + Review, Discard.
 - **Accessible:** Readable text, clear focus and keyboard buttons, no color-only meanings; avoid tiny targets.
 
@@ -16,7 +16,7 @@
 
 1. **Session setup/consent:** Explains that active sessions continuously process group audio and screen share, despite quiet voice output. Start is explicit; show whether screen is being shared.
 2. **Minimal gaming overlay:** Status chip, newest relevant recommendation, **Explain with voice** and Dismiss; optional recommendation history.
-3. **Voice explanation state:** Selected card shows Pending / Speaking / Finished / Failed. Always return to quiet recommendations after one response.
+3. **Voice explanation state:** Selected card shows Pending / Speaking / Finished / Failed. Always return to quiet recommendations after one response. Playback is private/local, never a shared FaceTime stream.
 4. **Session review:** Summary, key moments with timestamps and evidence labels, strengths/improvements, next steps, and Discard.
 5. **Error/empty:** No screen shared, no useful observation, microphone inaccessible, disconnected call, model unavailable, voice delivery failed, no events to review.
 
@@ -60,7 +60,7 @@ Avoid “danger” or high-certainty colors for weak evidence. Use helpful but c
 Idle on selected card
    → Click Explain with voice
    → Preparing
-   → Speaking (if Chert confirms delivery)
+   → Speaking locally (only on requester’s device)
    → Finished → Quiet
 
 On failure: Preparing → Unable to speak → Show detailed text fallback
@@ -68,9 +68,10 @@ On stale advice: Explain this earlier observation, not a current alert
 ```
 
 - While speaking, show which card is being explained. Disable duplicate requests.
-- If cancellation supported, show **Stop speaking**. If Chert cannot cancel, do not display a fake Stop button.
+- Provide **Stop speaking** when the chosen local synthesis mechanism supports cancellation; test on target device.
 - Speech should be conversational and short enough for live gameplay, but more informative than the text card: **what happened, why it matters, what to do**.
 - The user should not need to repeat the context. Preserve evidence IDs and role assignments.
+- Recommend headphones and test that microphone pickup does not make a local explanation audible to the group.
 - Return to Quiet Mode after each spoken explanation; do not silently enable a continuous voice-coach mode.
 
 ## 6. Activity identification
@@ -129,7 +130,7 @@ This is an illustrative layout, **not sample telemetry from a real match**. Ever
 - [ ] Session start requires active consent and displays audio/video monitoring status.
 - [ ] A new grounded recommendation is readable over the active game or is explicitly labeled a companion fallback.
 - [ ] Recommendation appears **without unsolicited speech**.
-- [ ] Button explains the **selected** recommendation and returns to quiet output.
+- [ ] Button privately speaks the **selected** recommendation only on the requester’s device, then returns to quiet output.
 - [ ] Duplicate frames do not flood the overlay.
 - [ ] Pausing and ending stop new processing and reflect correct status.
 - [ ] Review contains actual events and honest “unknown” statements; discard clears ephemeral data.
@@ -138,3 +139,11 @@ This is an illustrative layout, **not sample telemetry from a real match**. Ever
 ## 11. Out of scope
 
 No full multi-page analytics dashboard, charts with imaginary performance scores, video highlight editing, social feed, saved account history, theme customization, automatic speech warnings, or cross-game controls in the hackathon MVP.
+
+## Decision update — private explanation (confirmed 2026-11-14)
+
+- **Who hears it:** Only the participant who clicked **Explain with voice** on a selected recommendation.
+- **Where it plays:** Locally on that participant’s companion device, preferably through headphones. No TTS audio may be published into the FaceTime/LiveKit room or shared Chert call. If speakers are used, acoustic microphone pickup can still leak audio; test and warn.
+- **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
+- **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
+- **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.

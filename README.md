@@ -3,7 +3,7 @@
 **HackUTA 2026 · Chert — Best Use of FaceTime · Team of 4**  
 **Status:** Product decisions agreed; Chert runtime integration and implementation choices pending verification.
 
-> **Sidekick is a context-aware AI teammate for group FaceTime calls.** During an explicitly started, consented session it observes shared-screen activity and conversation context, proactively offers **quiet text advice in an overlay**, explains a **selected recommendation with voice only when someone presses its button**, and produces an **evidence-based end-of-session review**.
+> **Sidekick is a context-aware AI teammate for group FaceTime calls.** During an explicitly started, consented session it observes shared-screen activity and conversation context, proactively offers **quiet text advice in an overlay**, privately plays a **selected recommendation’s detailed voice explanation only to the person who presses its button**, and produces an **evidence-based end-of-session review**.
 
 ## Product in one sentence
 
@@ -17,20 +17,20 @@ Sidekick is not merely a screen describer, a chatbot waiting for questions, a ge
 2. Sidekick receives available FaceTime audio/transcripts and the participant's shared-screen content, and maintains temporary group context. The team has **confirmed the possibility of incoming FaceTime screen sharing with Chert**; its actual API/frame interface still requires a live test.
 3. It proposes an activity based on screen and conversation, then **asks for confirmation or correction** (gaming in the hackathon demo).
 4. It generates short, proactive **text-only recommendation cards** in an **overlay**. It never speaks merely because it detected an issue; suppress repeated or stale advice.
-5. Selecting **Explain with voice** on a specific card triggers one more detailed spoken explanation via the current FaceTime agent, then returns to quiet output. A player may cancel if supported.
+5. Selecting **Explain with voice** on a specific card plays a detailed explanation **locally on the requester’s device only** (headphones recommended), then returns to quiet output. Never inject this audio into the group FaceTime call.
 6. **End session → Review** creates a debrief from recorded events: key moments, strengths, weaknesses, decisions, recommendations, and next actions. Do not invent telemetry or outcomes.
 
 **Continuous input does not mean full-frame-rate AI inference.** Sample or throttle observations as required for performance. Quiet mode controls **output**, not audio capture; participants must be told that the session continuously processes audio.
 
 ## Hackathon MVP: gaming
 
-**Demonstration story:** Two or more people and Sidekick join a group FaceTime call. A participant says, “Alex is responsible for left defense.” The group shows a soccer game or controlled field simulation through FaceTime screen sharing. When the visible defender leaves the left zone, Sidekick remembers the assignment and displays: **“Left defense appears exposed. Have Alex drop back or arrange cover.”** A player selects the card and presses **Explain with voice**. Sidekick explains the observed issue and tactical options on the call. At session end the debrief reflects the actual detected event and recommendation.
+**Demonstration story:** Two or more people and Sidekick join a group FaceTime call. A participant says, “Alex is responsible for left defense.” The group shows a soccer game or controlled field simulation through FaceTime screen sharing. When the visible defender leaves the left zone, Sidekick remembers the assignment and displays: **“Left defense appears exposed. Have Alex drop back or arrange cover.”** A player selects the card and presses **Explain with voice**. Sidekick privately explains the issue on the requesting player’s device; the audio is not injected into the group call. At session end the debrief reflects the actual detected event and recommendation.
 
 Use a **controlled, clearly labeled soccer-field simulation or single well-chosen game scene** if commercial-game tracking is too unreliable. A simulation may simplify the visual scene, but **do not simulate the Chert FaceTime connection or pass prerecorded outputs off as live**.
 
 ### Acceptance gate
 
-A real FaceTime session conveys a spoken assignment and actual shared visual context; one recommendation uses **both**; the text card is visible; selected-card voice explanation plays (if the verified Chert voice interface supports it); session end produces an evidence-backed debrief. The live/fallback boundary must be disclosed clearly.
+A real FaceTime session conveys a spoken assignment and actual shared visual context; one recommendation uses **both**; the text card is visible; selected-card private voice explanation plays locally for its requester; session end produces an evidence-backed debrief. The live/fallback boundary must be disclosed clearly.
 
 ## Longer-term applications (not hackathon scope)
 
@@ -70,16 +70,16 @@ Do not scaffold a fictional API or impose a repository structure before checking
 
 | Owner | Primary workstream | First proof |
 | --- | --- | --- |
-| A — Chert integration | Group FaceTime, audio/screen ingestion, live spoken response | Actual call receives screen + speech; can respond |
+| A — Chert integration | Group FaceTime, audio/screen ingestion and call lifecycle | Actual call receives and exposes screen + speech context |
 | B — Context/session | Participant roles, activity, event models, session lifecycle | Spoken role persists into later observation |
 | C — Reasoning | Vision interpretation, tactical rule, recommendation generation/dedup | Screen change yields one grounded card |
-| D — UI/review/integration | Overlay, selected voice-button action, review, demo testing | Card click and end-of-session debrief work end-to-end |
+| D — UI/review/integration | Overlay, selected voice-button action, review, demo testing | Private playback and end-of-session debrief work end-to-end |
 
 Agree on the internal event contracts **before parallel work**; designate one integrator. Use short feature branches and frequent merges to a stable shared branch; avoid modifying each other's modules without coordination.
 
 ## Scope and authenticity
 
-**Must protect:** Chert FaceTime authenticity, meaningful shared-screen understanding, remembered context, quiet recommendations, selected voice explanation, and review. **Cut first:** iMessage, browser extension (unless needed as a verified fallback), full dashboard, persistent DB, Docker, advanced CI/CD, additional games/modes, invented statistics.
+**Must protect:** Chert FaceTime authenticity, meaningful shared-screen understanding, remembered context, quiet recommendations, private selected voice explanation, and review. **Cut first:** iMessage, browser extension (unless needed as a verified fallback), full dashboard, persistent DB, Docker, advanced CI/CD, additional games/modes, invented statistics.
 
 For a missed/unsupported Chert capability, report the limitation and demonstrate a clearly labeled fallback; never call a browser panel a native FaceTime overlay or claim that an unsupported voice path works.
 
@@ -90,3 +90,11 @@ For a missed/unsupported Chert capability, report the limitation and demonstrate
 - Team-supplied HackUTA 2026 presentation (general criteria: robustness, creativity, Odyssey theme; published schedule requires verification)
 
 **Do not trust dates in this README without checking the event dashboard.** The team presentation lists Devpost submission at **Saturday 11:59 PM**, a roughly 12-hour hacking period, and a **3-minute presentation + 2-minute Q&A** format. Build a repeatable, truthful three-minute demonstration; submit before the published cutoff.
+
+## Decision update — private explanation (confirmed 2026-11-14)
+
+- **Who hears it:** Only the participant who clicked **Explain with voice** on a selected recommendation.
+- **Where it plays:** Locally on that participant’s companion device, preferably through headphones. No TTS audio may be published into the FaceTime/LiveKit room or shared Chert call. If speakers are used, acoustic microphone pickup can still leak audio; test and warn.
+- **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
+- **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
+- **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.

@@ -2,7 +2,7 @@
 
 **Purpose:** Shared fixed roadmap for four developers and their AI coding assistants. This describes intended work; **no unchecked step is claimed implemented**. Track active owners/tasks in GitHub Issues or a team board instead of rewriting the roadmap after every commit.
 
-**Priority:** Prove real Chert group FaceTime + screen and conversation context **first**; then implement quiet recommendation, selected voice explanation, and event review. The overlay and review are part of the agreed MVP but may be simplified visually. Do not build unrelated systems to fill time.
+**Priority:** Prove real Chert group FaceTime + screen and conversation context **first**; then implement quiet recommendation, selected private local voice explanation, and event review. The overlay and review are part of the agreed MVP but may be simplified visually. Do not build unrelated systems to fill time.
 
 ## Phase 0 — Shared contracts and Chert proof (critical path)
 
@@ -11,7 +11,7 @@
 - [ ] Establish a **real group FaceTime call** with the agent.
 - [ ] Prove **incoming FaceTime screen-share observations** reach the agent as frames/supported media, as separately confirmed possible by the team.
 - [ ] Prove speech/transcript access; determine whether participant identity is included.
-- [ ] Prove an external trigger can generate **in-call spoken output** during an active call (the future voice button path).
+- [ ] Prove a user gesture can trigger and cancel **private local speech** while the FaceTime call stays active, without injecting speech into shared call audio.
 - [ ] On target gaming computer, determine feasible overlay approach; test drawing one static text card over a game or document honest fallback.
 - [ ] Record confirmed integration and gaps in `engineering.md`; finalize language/AI model in `techstack.md` only after evidence.
 - [ ] Agree normalized `Session`, `Observation`, `Recommendation`, `SessionEvent` contracts and one concrete gaming demo scene.
@@ -44,11 +44,11 @@
 - [ ] Attach **Explain with voice** to an individual card's stable recommendation ID.
 - [ ] Fetch that card's original evidence, roles and goals; handle stale cards honestly.
 - [ ] Generate one concise deeper explanation: observation → significance → action.
-- [ ] Route explanation through **verified Chert in-call speech output** and record delivery state.
+- [ ] Return explanation text to requesting participant’s companion UI and play with **private local TTS**; record local playback state.
 - [ ] Return to Quiet Mode after speech; avoid overlapping requests and support cancellation when possible.
 - [ ] If voice route unavailable, show detailed text as **explicit fallback** and record that the P0 voice requirement is incomplete.
 
-**Exit gate:** Clicking a selected card produces the expected audible explanation in the *same* live FaceTime call; no auto-coaching.
+**Exit gate:** Clicking a selected card privately plays the explanation on the requesting participant’s device, without publishing audio to the FaceTime call; no auto-coaching.
 
 ## Phase 4 — Event timeline and end review
 
@@ -75,7 +75,7 @@
 
 | Developer | Primary module | Handoff / acceptance |
 |---|---|---|
-| A | Chert call/audio/video/voice adapter | Live event shapes and tested output interface |
+| A | Chert call/audio/video adapter | Live FaceTime and screen/audio event shapes |
 | B | Session coordinator + memory | Validated role/goal/event objects available to reasoning |
 | C | Visual model + tactical rules + dedup | Grounded observation yields exactly one advice event |
 | D | Overlay + voice selection UI + review + demo | Working chosen-card interaction and event review |
@@ -98,8 +98,16 @@ The team-supplied HackUTA slides describe a Saturday 12 PM–midnight hacking wi
 - [ ] CH-1 — real Chert group call
 - [ ] CH-2 — screen-share frames available in agent
 - [ ] CH-3 — continuous transcript/audio, speaker attribution behavior
-- [ ] CH-4 — click-triggered voice on current call
+- [ ] CH-4 — click-triggered private local voice, isolated from shared FaceTime
 - [ ] CH-5 — actual overlay on target device
 - [ ] CH-6 — stop processing and generate review from events
 
 Record observed evidence, tested platform, owner, and status in issues or `engineering.md`. Product decisions are settled; **interface support is not**.
+
+## Decision update — private explanation (confirmed 2026-11-14)
+
+- **Who hears it:** Only the participant who clicked **Explain with voice** on a selected recommendation.
+- **Where it plays:** Locally on that participant’s companion device, preferably through headphones. No TTS audio may be published into the FaceTime/LiveKit room or shared Chert call. If speakers are used, acoustic microphone pickup can still leak audio; test and warn.
+- **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
+- **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
+- **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.

@@ -1,7 +1,7 @@
 # Sidekick AI — Engineering Specification
 
 **Status:** Architecture and **internal** contracts proposed for MVP; external Chert interfaces **not yet verified**.  
-**Primary scope:** One gaming session using real Chert group FaceTime + screen share, proactive quiet text overlay, selected recommendation spoken explanation, event-based debrief.  
+**Primary scope:** One gaming session using real Chert group FaceTime + screen share, proactive quiet text overlay, selected recommendation privately spoken on the requester’s device, event-based debrief.  
 **Authority:** Product scope → `requirements.md`; tech commitments → `techstack.md`; build order → `phases.md`; UI → `design.md`.
 
 > **Engineering rule:** Don't build an imaginary Chert SDK. First inspect the sponsor starter and live event payloads. Everything below that references an external integration is a **boundary to implement**, not an assertion that Chert exposes a particular API or endpoint.
@@ -21,21 +21,21 @@ flowchart TD
   RULE --> RM[Recommendation manager: dedup + staleness + evidence]
   RM --> UI[Local overlay or companion UI]
   RM --> LOG[In-memory event timeline]
-  UI -->|selected recommendation ID + Explain with voice| VOICE[Voice request handler]
-  VOICE --> CH
+  UI -->|selected recommendation ID + Explain with voice| VOICE[Private explanation handler]
+  VOICE --> UI
   LOG --> REVIEW[End-session review generator]
   REVIEW --> UI
 ```
 
 ### Separation of concerns
 
-- **Chert adapter:** handles external call events/audio/video/voice; normalizes provider details; reports actual capability flags.
+- **Chert adapter:** handles external call events/audio/video; normalizes provider details; reports actual capability flags.
 - **Session coordinator:** consent, participants, activity, goals, role assignments, lifecycle, latest observations, event history.
 - **Model adapter:** extracts structured observations from available frames and conversation; optional explanation/review generation. It never unilaterally declares observed facts true.
 - **Situation evaluator:** combines structured current observations, agreed roles/goals and simple tactical rules.
 - **Recommendation manager:** prioritizes, deduplicates, timestamps and tracks the lifecycle of advice.
 - **Overlay:** presents text cards and buttons; no provider credentials.
-- **Voice handler:** selects an existing recommendation, checks staleness, prepares grounded detail and requests supported Chert speech output.
+- **Voice handler:** selects an existing recommendation, checks staleness, prepares grounded detail and returns explanation text for **private local speech playback** on the requester’s device, never publishing audio to Chert/FaceTime.
 - **Review service:** summarizes logged evidence, separates facts/participant reports/inferences, records unknowns.
 
 ## 2. Proposed repository layout — scaffold only after starter inspection
@@ -107,7 +107,7 @@ export interface Recommendation {
   relatedGoal?: string;
   urgency: 'normal' | 'important';
   voiceRequestedAt?: string;
-  voiceDeliveryStatus?: 'pending' | 'playing' | 'finished' | 'failed';
+  voiceDeliveryStatus?: 'pending' | 'playing_locally' | 'finished' | 'failed';
 }
 
 export interface SessionEvent {
@@ -168,15 +168,15 @@ MVP safeguards:
 - A card is **stale** if there is no recent supporting observation; don't read old advice as a current fact.
 - Model outputs are untrusted suggestions: validate structure, size, evidence links and phrasing before UI display.
 
-## 7. Selected recommendation → speech flow
+## 7. Selected recommendation → private speech flow
 
 1. User clicks the **Explain with voice** control attached to `recommendationId`.
 2. Backend verifies active session and the card's ownership/status; fetches stored short advice, referenced observations, group goals and roles.
 3. If evidence is outdated, preface explanation with “Earlier…” or say it's no longer confirmed.
 4. Generate concise expanded guidance: **what was observed → why it matters → suggested corrective actions → any uncertainty**.
-5. Invoke **verified Chert in-call speech mechanism** through the adapter; don't presume external call injection is supported until tested.
+5. Return the grounded explanation to the requesting user’s companion UI. Trigger **local speech synthesis**, ideally from the user’s click, without publishing any audio track to Chert, LiveKit, or FaceTime.
 6. Mark delivery as `pending` → `playing` (if supported) → `finished` or `failed`; return to quiet text automatically. No overlapping explanations.
-7. If speech delivery fails, show the detailed text explanation **clearly labeled as a fallback** in the overlay. Never assert it was spoken.
+7. If private playback fails, display the detailed text explanation **clearly labeled as a fallback**. Test cancel/stop and check microphone loopback; recommend headphones.
 
 **Example expected words, if evidence supports them:** “Earlier, your assigned left defender advanced and the left defensive area looked open. If possession changes, that space could be exploited. Have Alex recover or ask another teammate to cover the left.”
 
@@ -210,7 +210,7 @@ Prefer the Chert starter's transport. If a companion overlay needs an API, it mi
 |---|---|---|
 | `getSessionState` | authenticated/paird session reference | consent/status/activity/current cards |
 | `getRecommendations` | session reference | latest short cards with stable IDs |
-| `requestVoiceExplanation` | session reference, `recommendationId` | pending / failed / delivered status and fallback text |
+| `requestVoiceExplanation` | authorized requester, session reference, `recommendationId` | grounded explanation text and playback status for local TTS; no shared audio |
 | `endSession` | session reference | observation processing stopped; review offered |
 | `generateReview` | ended session reference | event-grounded summary |
 | `discardSession` | session reference | clear in-memory event/context data |
@@ -224,7 +224,7 @@ Do not expose these publicly without session scoping, restricted origin, appropr
 | **CH-1 Group FaceTime** | Agent joins a real group call | Actual call + stable session ID; else stop and fix setup |
 | **CH-2 Incoming screen share** | Participant shares recognizable game/simulation screen | Agent process receives verifiable frame from screen stream; if unavailable, document actual API and reconsider capture path |
 | **CH-3 Conversation processing** | State role then query session context | Observed transcript/raw input available; if no speaker attribution, require explicit names |
-| **CH-4 Response to active call** | Trigger a programmatic voice explanation on selected advice | Speech is audible during same call; if unsupported, honest text fallback but mark voice P0 as incomplete |
+| **CH-4 Private voice** | Click a selected card on a participant’s device | Explanation plays only on that device. Verify no audio track goes to Chert and, using headphones, that other FaceTime participants do not hear it |
 | **CH-5 Overlay feasibility** | Display suggestion over game on target desktop | If true overlay fails, companion panel is clearly labeled a fallback and overlay P0 remains incomplete |
 | **CH-6 Session end** | Stop then request review | No new frames/audio processed; report uses logged events |
 
@@ -234,7 +234,7 @@ Keep short notes on **tested date, setup, actual SDK interface, successful resul
 
 - Chert method/event for **incoming FaceTime screen-share frames** (team says capability exists, API unknown).
 - Incoming **audio vs transcripts**, participant attribution and timing.
-- Supported **external trigger to speak on an ongoing call**, whether speech can be cancelled.
+- Supported **private local speech synthesis** and cancellation; user-gesture requirements; avoid call audio injection and test acoustic feedback.
 - Supported **overlay rendering**: OS-native over-game, companion browser panel, or FaceTime outgoing video are not interchangeable.
 - Callback/network/hosting requirements; sampling throughput, latency/cost; simultaneous video/speech routing.
 
@@ -243,9 +243,17 @@ Keep short notes on **tested date, setup, actual SDK interface, successful resul
 - Unit: new role updates supersede old role; session isolation; activity confirmation; fingerprint dedup; cooldown; stale/resolved rules; no unsourced confidence or invented metrics; stopped session ignores observations.
 - Contract: malformed model output rejected; invalid recommendation ID cannot trigger speech; cross-session IDs cannot read other sessions; repeated explain button cannot cause overlapping speech.
 - Review: references valid event IDs; explicitly unknown outcomes remain unknown; no events → honest empty review.
-- Manual end-to-end: real call + screen visual change + quiet card + selected speech + debrief, rehearsed twice on target network.
+- Manual end-to-end: real call + screen visual change + quiet card + selected **private local speech** + debrief, rehearsed twice on target network.
 - Failure: Chert disconnect; no screen; delayed frame; unavailable transcript; model timeout; voice failure; overlay hidden; participant stops monitoring.
 
 ## 12. Priority and change procedure
 
 The **product** is locked in `requirements.md`. Internal schemas here are the **proposed default** and may be revised when the working Chert starter proves a different data model is necessary. Change this document **before** simultaneously updating multiple modules, note the reason, update tests and any `phases.md` dependency. Keep integration adapters thin; never pretend the software already exists because this spec names a module.
+
+## Decision update — private explanation (confirmed 2026-11-14)
+
+- **Who hears it:** Only the participant who clicked **Explain with voice** on a selected recommendation.
+- **Where it plays:** Locally on that participant’s companion device, preferably through headphones. No TTS audio may be published into the FaceTime/LiveKit room or shared Chert call. If speakers are used, acoustic microphone pickup can still leak audio; test and warn.
+- **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
+- **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
+- **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.

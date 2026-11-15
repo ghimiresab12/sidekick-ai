@@ -11,7 +11,7 @@
 | Screen input | Participant FaceTime screen share | Team confirmed capability; event/frame API unverified |
 | Conversation input | Continuous speech processing during active, consented session | Product confirmed; transcript/event availability unverified |
 | Recommendation output | Quiet proactive text in an overlay | Product confirmed; implementation mechanism open |
-| Voice output | Click selected card → more detailed FaceTime speech | Product confirmed; external response API open |
+| Voice output | Click selected card → private speech locally on requester’s device | Product confirmed; local TTS permissions, cancellation, and isolation require testing |
 | Review | In-memory events → event-based debrief | Product confirmed; model adapter details TBD |
 | Demo domain | Gaming | Confirmed |
 
@@ -20,7 +20,7 @@
 | Layer | Candidate | Why | Commit when... |
 |---|---|---|---|
 | Main language | **TypeScript + Node.js**, if compatible with Chert starter | Shared schemas/types across agent, logic and UI | Starter inspected |
-| Chert integration | Official Chert agent runtime/SDK | FaceTime lifecycle, media and spoken response | Actual examples run |
+| Chert integration | Official Chert agent runtime/SDK | FaceTime lifecycle and incoming media | Actual examples run |
 | Multimodal model | **Gemini** behind a model-neutral adapter | Screen+conversation reasoning; Dami's candidate | Credentials, latency and image input tested |
 | Session state | In-memory Map keyed by session ID | Minimal setup, enough for a live demo | Contracts defined |
 | Validation | Zod or starter's existing schema library | Validate context/events/AI output | Avoid duplicate dependency |
@@ -51,7 +51,7 @@ Active group FaceTime call + user-approved screen share
                text overlay |  session debrief
                        selected-card button
                              |
-                 Chert spoken response adapter
+                 Private local speech adapter
 ```
 
 All provider-specific code stays behind adapters. Chert events become project-owned normalized observation objects; no business logic should depend on unverified SDK payloads.
@@ -61,7 +61,7 @@ All provider-specific code stays behind adapters. Chert events become project-ow
 - **Frame format, cadence and processing:** actual Chert stream API, acceptable sampling rate, compression and measured latency.
 - **Speaker diarization:** whether Chert exposes speaker IDs; explicit verbal identification if not.
 - **Overlay implementation:** true desktop always-on-top overlay vs browser companion window; video-card output is **not** assumed equivalent to an over-game overlay.
-- **Button-to-call speech:** exact Chert control for speaking in the ongoing group call; cancellation ability.
+- **Private voice playback:** local TTS implementation (browser speech synthesis is simplest), user-gesture/autoplay policy, cancellation, and verification that audio is neither sent to a shared call track nor acoustically picked up by a microphone. No Chert in-call speech API needed for MVP.
 - **Network setup:** local versus hosted process, Chert callback URL, any tunneling and firewall requirements.
 - **Model choice:** Gemini model/version, multimodal request limits, performance and API billing.
 
@@ -85,3 +85,11 @@ A permissioned Chrome extension remains **a contingency only** if the verified C
 - Sponsor: <https://www.trychert.com/uta>
 - Starter instructions: <https://app.trychert.com/skills.md>
 - Dami's *PITWALL AI — Technical Architecture & Hackathon Execution Plan*: useful session coordinator, modular ownership and go/no-go testing; **its extension, iMessage, Next.js dashboard, persistence and DevOps layers are not Sidekick MVP commitments.**
+
+## Decision update — private explanation (confirmed 2026-11-14)
+
+- **Who hears it:** Only the participant who clicked **Explain with voice** on a selected recommendation.
+- **Where it plays:** Locally on that participant’s companion device, preferably through headphones. No TTS audio may be published into the FaceTime/LiveKit room or shared Chert call. If speakers are used, acoustic microphone pickup can still leak audio; test and warn.
+- **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
+- **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
+- **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
