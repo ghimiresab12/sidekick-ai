@@ -91,7 +91,7 @@ async function start(env: Record<string, string> = {}, frameTimeoutMs = 2_000) {
     const id = created.body!.sessionId as string;
     engine.addParticipant(id, { displayName: 'Alex' });
     engine.confirmActivity(id, 'gaming');
-    const consent = await api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true } });
+    const consent = await api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true, allParticipantsAgreed: true } });
     return { id, generation: consent.body!.captureGeneration as number };
   }
   const frame = (id: string, image: Uint8Array, o: { mime?: string; generation?: number | string; observedAt?: string } = {}) =>

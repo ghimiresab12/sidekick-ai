@@ -170,3 +170,10 @@ See [vision.md](vision.md) for the controlled-scene profile and limitations.
 
 - `SIDEKICK_VISION` (`none` default, or `gemini`) connects Prabin's existing `src/adapters/model/gemini-vision.mts` to the bridge. It reuses `GEMINI_API_KEY` and `GEMINI_MODEL`, the same model as reasoning.
 - **No new dependencies.** `tsconfig.reasoning-compat.json` already type-checks `src/bridge/*.mts`, including the new `vision-wiring.mts`, against the adapter.
+
+### Overlay ↔ bridge API (milestone 4, 2026-11-15)
+
+- Still Node built-ins only: `node:http`, `node:crypto`, `node:fs`, and SSE written by hand. **No new dependencies.**
+- New optional server-only variables: `SIDEKICK_UI_DIR` and `SIDEKICK_UI_DEV_ORIGIN`.
+- New script: `npm run pair -- --room <room> [--participant <name>]` prints a one-time pairing URL. The control token is never printed.
+- Deployment stays **localhost only**.

@@ -5,7 +5,16 @@
  *   unexpected `Host` headers (DNS rebinding). Never expose it publicly.
  * - Two bearer tokens: the AGENT token may create sessions, read capture state and
  *   ingest; the CONTROL token may grant consent and change the lifecycle. The agent can
- *   never grant consent. Tokens are compared in constant time and never logged.
+ *   never grant consent. Tokens are compared in constant time and never logged. Bearer
+ *   requests carrying an `Origin` header are always refused: tokens never come from browsers.
+ * - Browser UI (milestone 4): served same-origin at `/ui/`, paired with a one-time code
+ *   (`POST /v1/sessions/:id/pairings` → `POST /v1/ui/pair`), then authenticated by a
+ *   session-scoped HttpOnly SameSite=Strict cookie. UI state changes require the bridge's
+ *   own `Origin` plus `X-Sidekick-UI: 1` (CSRF). A UI cookie is valid for exactly one
+ *   session; any other session id answers 404. Discard revokes all of a session's UI cookies.
+ *   UI cookies may pause/end/discard but never consent or resume (operator only). Every
+ *   browser-facing body is privacy-projected (src/privacy/browser-projection.ts): no goal,
+ *   decision or unsafe role wording leaves the server.
  * - Authentication, routing, content type and declared size are checked from headers
  *   BEFORE any body is read. Bodies are size-capped while streaming.
  * - All writes go through the coordinator; the engine is only read (capture state).
@@ -19,9 +28,14 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { SessionSnapshot } from '../contracts/types.js';
+import type { BrowserSessionTimeline, ExplanationScript, SessionSnapshot, VoiceRequest } from '../contracts/types.js';
 import type { SidekickCoordinator } from '../coordinator/coordinator.js';
 import type { FrameInput } from '../coordinator/ports.js';
+import { buildExplanationText } from '../explanations/explanation-text.js';
+import { projectOverlayState, projectParticipant, projectTimelineEvent, projectVoiceRequest } from '../privacy/browser-projection.js';
+import { openStateStream, type StateStream } from './sse.js';
+import { createStaticUi, UI_SECURITY_HEADERS, type StaticUiLimits } from './static-ui.js';
+import { clearedUiCookie, readCookie, UI_COOKIE, uiCookie, UiAuth, type UiClient } from './ui-auth.js';
 
 export const BRIDGE_HOST = '127.0.0.1';
 export const MAX_FRAME_BYTES = 5 * 1024 * 1024; // coordinator hard ceiling
@@ -50,27 +64,61 @@ export interface BridgeOptions {
   frameTimeoutMs?: number;
   /** Content-free request log hook. */
   onRequestLog?: (entry: BridgeLogEntry) => void;
+  /**
+   * Built overlay directory served at `/ui/` (e.g. `overlay/dist`). Loaded ONCE into an
+   * immutable in-memory snapshot when the bridge is created; an invalid or unsafe directory
+   * throws `StaticUiError`. Unset → `/ui/` answers 404.
+   */
+  uiDir?: string;
+  /** Snapshot bounds (defaults: 10 MiB per file, 64 MiB total, 2000 files, depth 16). */
+  uiLimits?: Partial<StaticUiLimits>;
+  /** Extra allowed browser origin for UI development (exactly `http://localhost:<port>` or `http://127.0.0.1:<port>`). */
+  uiDevOrigin?: string;
+  ui?: {
+    pairingTtlMs?: number;
+    idleTtlMs?: number;
+    maxPairingFailures?: number;
+    pairingFailureWindowMs?: number;
+    /** A client's private voice request is cancelled only after it has had no live stream for this long. */
+    voiceDisconnectGraceMs?: number;
+    heartbeatMs?: number;
+    maxStreamsPerSession?: number;
+    /** Concurrent streams one browser credential may hold (so one tab cannot exhaust the session cap). */
+    maxStreamsPerClient?: number;
+    now?: () => number;
+  };
 }
 
 export interface Bridge {
   readonly server: Server;
+  /** Static UI snapshot size (0/0 when no UI is configured). */
+  readonly uiFiles: number;
+  readonly uiBytes: number;
   /** Listens on 127.0.0.1 (port 0 = random). */
   listen(port?: number): Promise<{ port: number; url: string }>;
   close(): Promise<void>;
 }
 
-type Role = 'agent' | 'control';
+type Role = 'agent' | 'control' | 'ui';
+type Principal = { kind: 'agent' } | { kind: 'control' } | { kind: 'ui'; client: UiClient };
 type Handler = (ctx: RequestContext) => Promise<void>;
 interface Route {
   pattern: string;
   regex: RegExp;
   /** `bodyless`: any declared body (Content-Length > 0 or Transfer-Encoding) is rejected unread. */
-  methods: Partial<Record<string, { roles: Role[] | 'public'; handler: Handler; bodyless?: true }>>;
+  /**
+   * `public`: no credential. `pair`: no credential, but browser CSRF rules apply.
+   * `bodyless`: any declared body (Content-Length > 0 or Transfer-Encoding) is rejected unread.
+   */
+  methods: Partial<Record<string, { roles: Role[] | 'public' | 'pair'; handler: Handler; bodyless?: true }>>;
 }
 interface RequestContext {
   req: IncomingMessage;
   res: ServerResponse;
+  principal?: Principal;
   sessionId?: string;
+  /** Second path id (recommendation id or voice request id). */
+  itemId?: string;
 }
 
 /** Coordinator/engine error codes → HTTP status. Bodies carry the code only. */
@@ -82,6 +130,14 @@ const STATUS: Record<string, number> = {
   evidence_not_found: 400,
   session_not_found: 404,
   recommendation_not_found: 404,
+  voice_request_not_found: 404,
+  invalid_pairing: 401,
+  voice_busy: 409,
+  pairing_rate_limited: 429,
+  too_many_streams: 429,
+  participant_limit_reached: 409,
+  duplicate_participant: 409,
+  invalid_participant_name: 400,
   consent_required: 409,
   session_not_active: 409,
   invalid_transition: 409,
@@ -144,6 +200,31 @@ export function createBridge(options: BridgeOptions): Bridge {
   /** Routing index only (room → session); the engine remains the owner of session state. */
   const sessionsByRoom = new Map<string, string>();
   let boundPort = 0;
+  const uiOpts = options.ui ?? {};
+  const uiAuth = new UiAuth({
+    ...(uiOpts.now ? { now: uiOpts.now } : {}),
+    ...(uiOpts.pairingTtlMs !== undefined ? { pairingTtlMs: uiOpts.pairingTtlMs } : {}),
+    ...(uiOpts.idleTtlMs !== undefined ? { idleTtlMs: uiOpts.idleTtlMs } : {}),
+    ...(uiOpts.maxPairingFailures !== undefined ? { maxFailures: uiOpts.maxPairingFailures } : {}),
+    ...(uiOpts.pairingFailureWindowMs !== undefined ? { failureWindowMs: uiOpts.pairingFailureWindowMs } : {}),
+  });
+  const voiceGraceMs = uiOpts.voiceDisconnectGraceMs ?? 15_000;
+  const heartbeatMs = uiOpts.heartbeatMs ?? 15_000;
+  const maxStreamsPerSession = uiOpts.maxStreamsPerSession ?? 8;
+  const maxStreamsPerClient = uiOpts.maxStreamsPerClient ?? 2;
+  for (const [name, v] of [['voiceDisconnectGraceMs', voiceGraceMs], ['heartbeatMs', heartbeatMs], ['maxStreamsPerSession', maxStreamsPerSession], ['maxStreamsPerClient', maxStreamsPerClient]] as const) {
+    if (!Number.isSafeInteger(v) || v < 1) throw new RangeError(`${name} must be a positive integer`);
+  }
+  if (options.uiDevOrigin !== undefined && !/^http:\/\/(localhost|127\.0\.0\.1):\d{1,5}$/.test(options.uiDevOrigin)) {
+    throw new RangeError('uiDevOrigin must be http://localhost:<port> or http://127.0.0.1:<port>');
+  }
+  const staticUi = createStaticUi(options.uiDir, options.uiLimits ? { limits: options.uiLimits } : {});
+  /** Live state streams per session (for discard notification and the per-session cap). */
+  const streams = new Map<string, Set<StateStream>>();
+  /** Private voice request ownership: requestId → owning UI client. */
+  const voiceOwners = new Map<string, { clientId: string; sessionId: string }>();
+  const selfOrigins = () => new Set([`http://${BRIDGE_HOST}:${boundPort}`, `http://localhost:${boundPort}`, ...(options.uiDevOrigin ? [options.uiDevOrigin] : [])]);
+  const ID_RE = SESSION_ID_RE;
 
   // ── Response helpers ──────────────────────────────────────────────────────
 
@@ -151,8 +232,7 @@ export function createBridge(options: BridgeOptions): Bridge {
     if (res.headersSent || res.destroyed) return;
     const payload = body === undefined ? '' : JSON.stringify(body);
     res.writeHead(status, {
-      'cache-control': 'no-store',
-      'x-content-type-options': 'nosniff',
+      ...UI_SECURITY_HEADERS,
       ...(body === undefined ? {} : { 'content-type': 'application/json; charset=utf-8' }),
       'content-length': String(Buffer.byteLength(payload)),
       ...headers,
@@ -335,10 +415,17 @@ export function createBridge(options: BridgeOptions): Bridge {
     }
   };
 
+  /**
+   * Operator-only. Session-level consent for the MVP: the operator must explicitly attest
+   * that ALL participants agreed. A single UI click is never treated as group consent.
+   */
   const consentHandler: Handler = async (ctx) => {
-    const body = await readJson(ctx, ['consent']);
+    const body = await readJson(ctx, ['consent', 'allParticipantsAgreed']);
     if (!body) return;
     if (body.consent !== true) return send(ctx.res, 400, { ok: false, error: 'explicit_consent_required' });
+    if (body.allParticipantsAgreed !== true) {
+      return send(ctx.res, 400, { ok: false, error: 'all_participants_agreement_required' });
+    }
     const r = coordinator.startWithConsent(ctx.sessionId!);
     if (!r.ok) return fail(ctx.res, r.error);
     send(ctx.res, 200, { ok: true, ...lifecycleView(r.value) });
@@ -347,31 +434,291 @@ export function createBridge(options: BridgeOptions): Bridge {
   const lifecycleHandler = (op: 'pause' | 'resume' | 'end'): Handler => async (ctx) => {
     const r = coordinator[op](ctx.sessionId!);
     if (!r.ok) return fail(ctx.res, r.error);
+    pruneVoiceOwners(ctx.sessionId!); // pause/end cancel live explanations
     send(ctx.res, 200, { ok: true, ...lifecycleView(r.value) });
   };
 
   const discardHandler: Handler = async (ctx) => {
-    const r = coordinator.discard(ctx.sessionId!);
+    const sid = ctx.sessionId!;
+    const r = coordinator.discard(sid);
     if (!r.ok) return fail(ctx.res, r.error);
-    for (const [room, id] of sessionsByRoom) if (id === ctx.sessionId) sessionsByRoom.delete(room);
-    send(ctx.res, 204);
+    for (const [room, id] of sessionsByRoom) if (id === sid) sessionsByRoom.delete(room);
+    // Revoke every UI credential of the session and tell its live streams it is gone.
+    uiAuth.revokeSession(sid);
+    for (const stream of [...(streams.get(sid) ?? [])]) stream.discarded();
+    streams.delete(sid);
+    for (const [requestId, owner] of voiceOwners) if (owner.sessionId === sid) voiceOwners.delete(requestId);
+    send(ctx.res, 204, undefined, ctx.principal?.kind === 'ui' ? { 'set-cookie': clearedUiCookie() } : {});
+  };
+
+  // ── UI handlers (milestone 4) ─────────────────────────────────────────────
+
+  const uiClient = (ctx: RequestContext) => (ctx.principal?.kind === 'ui' ? ctx.principal.client : undefined);
+
+  /**
+   * Drops ownership records whose request is no longer live (finished, failed, cancelled by
+   * the user, by pause/end/timeout, or gone with the session). One snapshot per session.
+   */
+  function pruneVoiceOwners(sessionId: string): void {
+    const snap = coordinator.engine.getSession(sessionId);
+    const live = new Set(
+      snap.ok ? snap.value.voiceRequests.filter((v) => v.status === 'pending' || v.status === 'playing_locally').map((v) => v.id) : [],
+    );
+    for (const [id, owner] of voiceOwners) if (owner.sessionId === sessionId && !live.has(id)) voiceOwners.delete(id);
+  }
+  const ownsLiveVoice = (client: UiClient) => {
+    pruneVoiceOwners(client.sessionId);
+    return [...voiceOwners.values()].some((o) => o.clientId === client.id);
+  };
+
+  /**
+   * Bounded disconnect handling: a client's private voice request is cancelled
+   * (`client_disconnected`) only after the client has had NO live stream and no
+   * authenticated request for `voiceDisconnectGraceMs`. Short reconnects never cancel.
+   */
+  function armGrace(client: UiClient): void {
+    if (client.graceTimer) clearTimeout(client.graceTimer);
+    delete client.graceTimer;
+    if (client.openStreams > 0 || !ownsLiveVoice(client)) return;
+    client.graceTimer = setTimeout(() => {
+      delete client.graceTimer;
+      if (client.openStreams > 0 || !uiAuth.isActive(client)) return;
+      pruneVoiceOwners(client.sessionId);
+      for (const [requestId, owner] of voiceOwners) {
+        if (owner.clientId === client.id) coordinator.cancelExplanation(owner.sessionId, requestId, 'client_disconnected');
+      }
+      pruneVoiceOwners(client.sessionId);
+    }, voiceGraceMs);
+    client.graceTimer.unref?.();
+  }
+
+  /** M4: page-reload recovery. Resolves the session purely from the HttpOnly cookie. */
+  const uiSessionHandler: Handler = async (ctx) => {
+    const client = uiClient(ctx)!;
+    const snap = coordinator.engine.getSession(client.sessionId);
+    if (!snap.ok) {
+      uiAuth.revokeSession(client.sessionId);
+      return reject(ctx.res, 401, 'unauthorized', { 'set-cookie': clearedUiCookie() });
+    }
+    send(ctx.res, 200, { ok: true, sessionId: client.sessionId, ...(client.participantId ? { participantId: client.participantId } : {}) });
+  };
+
+  const createPairingHandler: Handler = async (ctx) => {
+    const body = await readJson(ctx, ['participantId']);
+    if (!body) return;
+    const snap = sessionOr404(ctx);
+    if (!snap) return;
+    const participantId = body.participantId;
+    if (participantId !== undefined && (typeof participantId !== 'string' || !snap.participants.some((p) => p.id === participantId))) {
+      return fail(ctx.res, 'participant_not_found');
+    }
+    const { code, expiresAtMs } = uiAuth.createPairing(snap.id, participantId as string | undefined);
+    // The code is returned once to the trusted operator; it is never logged or stored in plaintext.
+    send(ctx.res, 201, {
+      ok: true, code, expiresAt: new Date(expiresAtMs).toISOString(),
+      url: `http://${BRIDGE_HOST}:${boundPort}/ui/#pair=${code}`,
+    });
+  };
+
+  const pairHandler: Handler = async (ctx) => {
+    const body = await readJson(ctx, ['code']);
+    if (!body) return;
+    const r = uiAuth.redeem(body.code);
+    if (!r.ok) return fail(ctx.res, r.error);
+    const snap = coordinator.engine.getSession(r.client.sessionId);
+    if (!snap.ok) {
+      uiAuth.revokeSession(r.client.sessionId);
+      return fail(ctx.res, 'invalid_pairing');
+    }
+    send(ctx.res, 200, { ok: true, sessionId: r.client.sessionId, ...(r.client.participantId ? { participantId: r.client.participantId } : {}) }, {
+      'set-cookie': uiCookie(r.credential),
+    });
+  };
+
+  const streamHandler: Handler = async (ctx) => {
+    const sid = ctx.sessionId!;
+    if (!sessionOr404(ctx)) return;
+    const set = streams.get(sid) ?? new Set<StateStream>();
+    if (set.size >= maxStreamsPerSession) return fail(ctx.res, 'too_many_streams');
+    const client = uiClient(ctx);
+    if (client && client.openStreams >= maxStreamsPerClient) return fail(ctx.res, 'too_many_streams');
+    let unsubscribe: () => void = () => {};
+    const stream = openStateStream(ctx.res, {
+      heartbeatMs,
+      // M1: a healthy stream is presence; the idle clock restarts from its last heartbeat.
+      onHeartbeat: () => { if (client) uiAuth.touch(client); },
+      onClose: () => {
+        unsubscribe();
+        set.delete(stream);
+        if (set.size === 0) streams.delete(sid);
+        if (client) {
+          uiAuth.touch(client);
+          client.openStreams = Math.max(0, client.openStreams - 1);
+          armGrace(client);
+        }
+      },
+    });
+    set.add(stream);
+    streams.set(sid, set);
+    if (client) {
+      client.openStreams += 1;
+      armGrace(client); // clears any pending grace timer
+    }
+    // The engine delivers the current state when subscribe returns, then every newer version.
+    // M5: browsers only ever receive the projected state (safe role labels).
+    const sub = coordinator.engine.subscribe(sid, (state) => {
+      if (state.activeVoiceRequest === undefined) pruneVoiceOwners(sid); // terminal requests drop ownership promptly
+      stream.send(projectOverlayState(state));
+    });
+    if (sub.ok) unsubscribe = sub.value;
+    else stream.close();
+  };
+
+  const participantsListHandler: Handler = async (ctx) => {
+    const snap = sessionOr404(ctx);
+    if (!snap) return;
+    send(ctx.res, 200, {
+      ok: true,
+      participants: snap.participants.map(projectParticipant),
+    });
+  };
+
+  const participantsAddHandler: Handler = async (ctx) => {
+    const control = ctx.principal?.kind === 'control';
+    const body = await readJson(ctx, control ? ['displayName', 'externalRef'] : ['displayName']);
+    if (!body) return;
+    const r = coordinator.addParticipant(ctx.sessionId!, {
+      displayName: body.displayName as string,
+      ...(body.externalRef !== undefined ? { externalRef: body.externalRef as string } : {}),
+    });
+    if (!r.ok) return fail(ctx.res, r.error);
+    send(ctx.res, 201, { ok: true, id: r.value.id, displayName: r.value.displayName });
+  };
+
+  const activityHandler: Handler = async (ctx) => {
+    const body = await readJson(ctx, ['activity']);
+    if (!body) return;
+    if (body.activity !== 'gaming') return fail(ctx.res, 'invalid_input'); // MVP: gaming only
+    const r = coordinator.confirmActivity(ctx.sessionId!, 'gaming');
+    if (!r.ok) return fail(ctx.res, r.error);
+    send(ctx.res, 200, { ok: true, ...lifecycleView(r.value), activity: r.value.activity, activityConfirmed: r.value.activityConfirmed });
+  };
+
+  const dismissHandler: Handler = async (ctx) => {
+    const r = coordinator.dismiss(ctx.sessionId!, ctx.itemId!);
+    if (!r.ok) return fail(ctx.res, r.error);
+    send(ctx.res, 200, { ok: true });
+  };
+
+  const explanationHandler: Handler = async (ctx) => {
+    const client = uiClient(ctx)!;
+    const r = coordinator.requestExplanation(ctx.sessionId!, ctx.itemId!, client.participantId ? { requesterParticipantId: client.participantId } : undefined);
+    if (!r.ok) return fail(ctx.res, r.error);
+    pruneVoiceOwners(ctx.sessionId!);
+    voiceOwners.set(r.value.request.id, { clientId: client.id, sessionId: ctx.sessionId! });
+    const script: ExplanationScript = {
+      request: projectVoiceRequest(r.value.request),
+      text: buildExplanationText(r.value.context),
+      refersToEarlierObservation: r.value.context.isStale,
+    };
+    armGrace(client);
+    send(ctx.res, 200, { ok: true, ...script });
+  };
+
+  /**
+   * Only the client that requested an explanation may report on or cancel it. Any request
+   * that is no longer live (finished, failed, cancelled, timed out — swept first so an
+   * expired request is recognised now — or gone with the session) answers
+   * `404 voice_request_not_found`, never a 409 or another error.
+   */
+  function ownedRequest(ctx: RequestContext): boolean {
+    coordinator.engine.sweepStale(ctx.sessionId!);
+    pruneVoiceOwners(ctx.sessionId!);
+    const owner = voiceOwners.get(ctx.itemId!);
+    const client = uiClient(ctx)!;
+    if (!owner || owner.sessionId !== ctx.sessionId) {
+      fail(ctx.res, 'voice_request_not_found');
+      return false;
+    }
+    if (owner.clientId !== client.id) {
+      reject(ctx.res, 403, 'not_request_owner');
+      return false;
+    }
+    return true;
+  }
+  const finishVoice = (ctx: RequestContext, request: VoiceRequest) => {
+    if (request.status !== 'pending' && request.status !== 'playing_locally') voiceOwners.delete(request.id);
+    pruneVoiceOwners(ctx.sessionId!);
+    armGrace(uiClient(ctx)!);
+    send(ctx.res, 200, { ok: true, request: projectVoiceRequest(request) });
+  };
+
+  const voiceStatusHandler: Handler = async (ctx) => {
+    const body = await readJson(ctx, ['status']);
+    if (!body) return;
+    if (!ownedRequest(ctx)) return;
+    const status = body.status;
+    if (status !== 'playing_locally' && status !== 'finished' && status !== 'failed') return fail(ctx.res, 'invalid_input');
+    const r = coordinator.reportVoiceStatus(ctx.sessionId!, ctx.itemId!, status);
+    if (!r.ok) return fail(ctx.res, r.error);
+    finishVoice(ctx, r.value);
+  };
+
+  const voiceCancelHandler: Handler = async (ctx) => {
+    if (!ownedRequest(ctx)) return;
+    const r = coordinator.cancelExplanation(ctx.sessionId!, ctx.itemId!, 'user');
+    if (!r.ok) return fail(ctx.res, r.error);
+    finishVoice(ctx, r.value);
+  };
+
+  const timelineHandler: Handler = async (ctx) => {
+    const snap = sessionOr404(ctx);
+    if (!snap) return;
+    const events = coordinator.engine.getTimeline(snap.id);
+    if (!events.ok) return fail(ctx.res, events.error);
+    // M5: explicit browser projection — no goal/decision wording, rebuilt summaries, safe roles.
+    const lookup = {
+      names: new Map(snap.participants.map((p) => [p.id, p.displayName])),
+      titles: new Map(snap.recommendations.map((r) => [r.id, r.title])),
+    };
+    const timeline: BrowserSessionTimeline = {
+      events: events.value.map((e) => projectTimelineEvent(e, lookup)),
+      truncated: snap.timelineTruncated,
+    };
+    send(ctx.res, 200, { ok: true, ...timeline });
   };
 
   const sessionPath = (suffix: string) => new RegExp(`^/v1/sessions/([^/]+)${suffix}$`);
   const routes: Route[] = [
     { pattern: '/v1/health', regex: /^\/v1\/health$/, methods: { GET: { roles: 'public', bodyless: true, handler: async (ctx) => send(ctx.res, 200, { ok: true }) } } },
-    { pattern: '/v1/sessions', regex: /^\/v1\/sessions$/, methods: { POST: { roles: ['agent'], handler: createSessionHandler } } },
-    { pattern: '/v1/sessions/:id', regex: sessionPath(''), methods: { DELETE: { roles: ['control'], bodyless: true, handler: discardHandler } } },
+    { pattern: '/v1/ui/pair', regex: /^\/v1\/ui\/pair$/, methods: { POST: { roles: 'pair', handler: pairHandler } } },
+    { pattern: '/v1/ui/session', regex: /^\/v1\/ui\/session$/, methods: { GET: { roles: ['ui'], bodyless: true, handler: uiSessionHandler } } },
+    { pattern: '/v1/sessions', regex: /^\/v1\/sessions$/, methods: { POST: { roles: ['agent', 'control'], handler: createSessionHandler } } },
+    { pattern: '/v1/sessions/:id', regex: sessionPath(''), methods: { DELETE: { roles: ['control', 'ui'], bodyless: true, handler: discardHandler } } },
+    { pattern: '/v1/sessions/:id/pairings', regex: sessionPath('/pairings'), methods: { POST: { roles: ['control'], handler: createPairingHandler } } },
+    { pattern: '/v1/sessions/:id/stream', regex: sessionPath('/stream'), methods: { GET: { roles: ['ui', 'control'], bodyless: true, handler: streamHandler } } },
+    {
+      pattern: '/v1/sessions/:id/participants', regex: sessionPath('/participants'), methods: {
+        GET: { roles: ['ui', 'control'], bodyless: true, handler: participantsListHandler },
+        POST: { roles: ['ui', 'control'], handler: participantsAddHandler },
+      },
+    },
+    { pattern: '/v1/sessions/:id/activity', regex: sessionPath('/activity'), methods: { POST: { roles: ['ui', 'control'], handler: activityHandler } } },
+    { pattern: '/v1/sessions/:id/recommendations/:rid/dismiss', regex: sessionPath('/recommendations/([^/]+)/dismiss'), methods: { POST: { roles: ['ui', 'control'], bodyless: true, handler: dismissHandler } } },
+    { pattern: '/v1/sessions/:id/recommendations/:rid/explanation', regex: sessionPath('/recommendations/([^/]+)/explanation'), methods: { POST: { roles: ['ui'], bodyless: true, handler: explanationHandler } } },
+    { pattern: '/v1/sessions/:id/voice/:requestId/status', regex: sessionPath('/voice/([^/]+)/status'), methods: { POST: { roles: ['ui'], handler: voiceStatusHandler } } },
+    { pattern: '/v1/sessions/:id/voice/:requestId/cancel', regex: sessionPath('/voice/([^/]+)/cancel'), methods: { POST: { roles: ['ui'], bodyless: true, handler: voiceCancelHandler } } },
+    { pattern: '/v1/sessions/:id/timeline', regex: sessionPath('/timeline'), methods: { GET: { roles: ['ui', 'control'], bodyless: true, handler: timelineHandler } } },
     { pattern: '/v1/sessions/:id/capture', regex: sessionPath('/capture'), methods: { GET: { roles: ['agent', 'control'], bodyless: true, handler: captureHandler } } },
     { pattern: '/v1/sessions/:id/transcripts', regex: sessionPath('/transcripts'), methods: { POST: { roles: ['agent'], handler: transcriptHandler } } },
     { pattern: '/v1/sessions/:id/frames', regex: sessionPath('/frames'), methods: { POST: { roles: ['agent'], handler: frameHandler } } },
     { pattern: '/v1/sessions/:id/consent', regex: sessionPath('/consent'), methods: { POST: { roles: ['control'], handler: consentHandler } } },
-    { pattern: '/v1/sessions/:id/pause', regex: sessionPath('/pause'), methods: { POST: { roles: ['control'], bodyless: true, handler: lifecycleHandler('pause') } } },
+    { pattern: '/v1/sessions/:id/pause', regex: sessionPath('/pause'), methods: { POST: { roles: ['control', 'ui'], bodyless: true, handler: lifecycleHandler('pause') } } },
     { pattern: '/v1/sessions/:id/resume', regex: sessionPath('/resume'), methods: { POST: { roles: ['control'], bodyless: true, handler: lifecycleHandler('resume') } } },
-    { pattern: '/v1/sessions/:id/end', regex: sessionPath('/end'), methods: { POST: { roles: ['control'], bodyless: true, handler: lifecycleHandler('end') } } },
+    { pattern: '/v1/sessions/:id/end', regex: sessionPath('/end'), methods: { POST: { roles: ['control', 'ui'], bodyless: true, handler: lifecycleHandler('end') } } },
   ];
 
-  function authenticate(req: IncomingMessage): Role | undefined {
+  function bearerRole(req: IncomingMessage): 'agent' | 'control' | undefined {
     const header = req.headers.authorization;
     if (typeof header !== 'string' || !header.startsWith('Bearer ')) return undefined;
     const presented = digest(header.slice('Bearer '.length));
@@ -380,15 +727,31 @@ export function createBridge(options: BridgeOptions): Bridge {
     return undefined;
   }
 
+  const decodeId = (raw: string | undefined) => {
+    if (raw === undefined) return undefined;
+    try {
+      const d = decodeURIComponent(raw);
+      return ID_RE.test(d) ? d : '';
+    } catch {
+      return '';
+    }
+  };
+
   async function handle(req: IncomingMessage, res: ServerResponse, setRoute: (pattern: string) => void): Promise<void> {
     const host = req.headers.host;
     if (host !== `${BRIDGE_HOST}:${boundPort}` && host !== `localhost:${boundPort}`) {
       return reject(res, 403, 'forbidden_host');
     }
-    if (req.headers.origin !== undefined) {
-      return reject(res, 403, 'forbidden_origin');
-    }
+    const origin = req.headers.origin;
+    const sameOrigin = origin !== undefined && selfOrigins().has(origin);
+    // Foreign origins are refused everywhere; same-origin is allowed only for the UI below.
+    if (origin !== undefined && !sameOrigin) return reject(res, 403, 'forbidden_origin');
     const path = (req.url ?? '').split('?')[0]!;
+    if (path === '/ui' || path.startsWith('/ui/')) {
+      setRoute('/ui/*');
+      await staticUi.handle(req, res, path);
+      return;
+    }
     const route = routes.find((r) => r.regex.test(path));
     if (!route) return reject(res, 404, 'not_found');
     setRoute(route.pattern);
@@ -396,30 +759,48 @@ export function createBridge(options: BridgeOptions): Bridge {
     if (!method) {
       return reject(res, 405, 'method_not_allowed', { allow: Object.keys(route.methods).join(', ') });
     }
-    if (method.roles !== 'public') {
-      const role = authenticate(req);
-      if (!role) {
-        return reject(res, 401, 'unauthorized', { 'www-authenticate': 'Bearer' });
+
+    // ── Who is calling? Bearer token (server processes) or UI cookie (browser).
+    let principal: Principal | undefined;
+    if (req.headers.authorization !== undefined) {
+      // Server tokens never come from browsers: any Origin on a bearer request is refused.
+      if (origin !== undefined) return reject(res, 403, 'forbidden_origin');
+      const role = bearerRole(req);
+      if (!role) return reject(res, 401, 'unauthorized', { 'www-authenticate': 'Bearer' });
+      principal = { kind: role };
+    } else {
+      const credential = readCookie(req.headers.cookie, UI_COOKIE);
+      if (credential !== undefined) {
+        const client = uiAuth.authenticate(credential);
+        if (!client) return reject(res, 401, 'unauthorized', { 'set-cookie': clearedUiCookie() });
+        principal = { kind: 'ui', client };
       }
-      if (!method.roles.includes(role)) {
-        return reject(res, 403, 'forbidden');
-      }
+    }
+    const browser = principal?.kind === 'ui' || method.roles === 'pair';
+    // CSRF: browser state changes need the bridge's own Origin AND the custom header
+    // (a cross-site page cannot set it without a CORS preflight, which is never granted).
+    if (browser && req.method !== 'GET' && req.method !== 'HEAD' && (!sameOrigin || req.headers['x-sidekick-ui'] !== '1')) {
+      return reject(res, 403, 'csrf_rejected');
+    }
+    if (method.roles !== 'public' && method.roles !== 'pair') {
+      if (!principal) return reject(res, 401, 'unauthorized', { 'www-authenticate': 'Bearer' });
+      if (!method.roles.includes(principal.kind)) return reject(res, 403, 'forbidden');
     }
     if (method.bodyless && hasDeclaredBody(req)) return reject(res, 400, 'unexpected_body');
-    const ctx: RequestContext = { req, res };
-    const id = route.regex.exec(path)?.[1];
-    if (id !== undefined) {
-      let decoded: string;
-      try {
-        decoded = decodeURIComponent(id);
-      } catch {
-        decoded = '';
-      }
-      if (!SESSION_ID_RE.test(decoded)) {
-        return reject(res, 404, 'session_not_found');
-      }
-      ctx.sessionId = decoded;
+
+    const ctx: RequestContext = { req, res, ...(principal ? { principal } : {}) };
+    const match = route.regex.exec(path)!;
+    const sessionId = decodeId(match[1]);
+    const itemId = decodeId(match[2]);
+    if (sessionId === '') return reject(res, 404, 'session_not_found');
+    if (itemId === '') return reject(res, 404, 'not_found');
+    if (sessionId !== undefined) {
+      // A UI credential is scoped to exactly one session; anything else looks like it does not exist.
+      if (principal?.kind === 'ui' && principal.client.sessionId !== sessionId) return reject(res, 404, 'session_not_found');
+      ctx.sessionId = sessionId;
     }
+    if (itemId !== undefined) ctx.itemId = itemId;
+    if (principal?.kind === 'ui') armGrace(principal.client); // any authenticated request counts as presence
     await method.handler(ctx);
   }
 
@@ -441,6 +822,8 @@ export function createBridge(options: BridgeOptions): Bridge {
   server.maxHeadersCount = 50;
 
   return {
+    uiFiles: staticUi.files,
+    uiBytes: staticUi.totalBytes,
     server,
     listen(port = 0) {
       return new Promise((resolve, reject) => {
@@ -453,6 +836,8 @@ export function createBridge(options: BridgeOptions): Bridge {
       });
     },
     close() {
+      for (const set of streams.values()) for (const stream of [...set]) stream.close();
+      streams.clear();
       return new Promise((resolve) => {
         server.close(() => resolve());
         server.closeAllConnections();

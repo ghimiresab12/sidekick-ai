@@ -129,3 +129,4 @@ and recorded verification; do not treat mock output as live Gemini or Chert proo
 - **Blocker:** a real Chert call must confirm whether the connection greeting is mandatory and whether screen share reaches the agent (the CH-2 proof).
 
 - [x] Gemini vision wired into the HTTP bridge behind `SIDEKICK_VISION=gemini` (milestone 3, 2026-11-15). Tested with mocked Gemini HTTP only; no live call, Chert frames or Python agent yet.
+- [x] Overlay ↔ bridge browser API: pairing, session-scoped cookies, live state stream, participants, activity confirmation, dismiss, explanations, voice ownership, timeline, same-origin UI serving (milestone 4, 2026-11-15). Mock-tested; the overlay's HTTP backend (Tunji) is still to do. Review fixes M1–M5 applied (idle refresh on heartbeats, operator-only resume, participant limit and duplicate names, `GET /v1/ui/session` reload recovery, browser privacy projection).

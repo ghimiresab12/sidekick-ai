@@ -6,10 +6,13 @@
  * `fetchImpl` can only be injected from code (tests), never from the environment, so
  * production traffic cannot be redirected by configuration.
  */
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { SidekickCoordinator } from '../coordinator/coordinator.js';
 import type { ReasoningFn, VisionPort } from '../coordinator/ports.js';
 import { loadBridgeConfig, type BridgeConfig } from './config.js';
-import { createBridge, type Bridge, type BridgeLogEntry } from './http-bridge.js';
+import { createBridge, type Bridge, type BridgeLogEntry, type BridgeOptions } from './http-bridge.js';
+import { StaticUiError } from './static-ui.js';
 
 /** Configuration problem with a safe, credential-free message. */
 export class RuntimeConfigError extends Error {
@@ -25,13 +28,19 @@ export interface RuntimeOptions {
   /** Single frame deadline (upload + vision). Default 10 s. Also caps the vision adapter timeout. */
   frameTimeoutMs?: number;
   onRequestLog?: (entry: BridgeLogEntry) => void;
+  /** Test-only overrides for UI pairing/stream timings. */
+  ui?: BridgeOptions['ui'];
+  /** Override the served UI directory (tests). */
+  uiDir?: string;
+  /** Test-only engine/coordinator clock (never configurable from the environment). */
+  now?: () => Date;
 }
 
 export interface BridgeRuntime {
   config: BridgeConfig;
   coordinator: SidekickCoordinator;
   bridge: Bridge;
-  labels: { reasoning: string; vision: string };
+  labels: { reasoning: string; vision: string; ui: string };
   /** Starts listening on 127.0.0.1 and the periodic stale/voice sweep. */
   listen(port?: number): Promise<{ port: number; url: string }>;
   close(): Promise<void>;
@@ -76,10 +85,14 @@ export async function createBridgeRuntime(
   }
 
   const coordinator = new SidekickCoordinator({
+    ...(options.now ? { now: options.now } : {}),
     reasoning: reasoning.reasoning,
     ...(vision.vision ? { vision: vision.vision } : {}),
     conditionFactKeys: vision.conditionFactKeys,
   });
+  // Same-origin UI: explicit SIDEKICK_UI_DIR, else the repo's built overlay if present.
+  const defaultUi = fileURLToPath(new URL('../../../overlay/dist', import.meta.url));
+  const uiDir = options.uiDir ?? config.uiDir ?? (existsSync(defaultUi) ? defaultUi : undefined);
   let bridge: Bridge;
   try {
     bridge = createBridge({
@@ -88,8 +101,12 @@ export async function createBridgeRuntime(
       controlToken: config.controlToken,
       frameTimeoutMs,
       ...(options.onRequestLog ? { onRequestLog: options.onRequestLog } : {}),
+      ...(uiDir ? { uiDir } : {}),
+      ...(config.uiDevOrigin ? { uiDevOrigin: config.uiDevOrigin } : {}),
+      ...(options.ui ? { ui: options.ui } : {}),
     });
   } catch (error) {
+    if (error instanceof StaticUiError) throw new RuntimeConfigError(`UI directory rejected (SIDEKICK_UI_DIR / overlay/dist): ${error.message}`);
     throw new RuntimeConfigError(error instanceof RangeError ? error.message : 'invalid bridge configuration');
   }
 
@@ -98,7 +115,13 @@ export async function createBridgeRuntime(
     config,
     coordinator,
     bridge,
-    labels: { reasoning: reasoning.label, vision: vision.label },
+    labels: {
+      reasoning: reasoning.label,
+      vision: vision.label,
+      ui: uiDir
+        ? `served at /ui/ from an in-memory snapshot (${bridge.uiFiles} files, ${bridge.uiBytes} bytes; restart to pick up a rebuild; pair with \`npm run pair\`)`
+        : 'not built — /ui/ answers 404 (build overlay/ first)',
+    },
     async listen(port = config.port) {
       const address = await bridge.listen(port);
       // Stale-card and abandoned-voice sweeps (docs/engineering.md §3.1).

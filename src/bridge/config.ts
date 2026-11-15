@@ -12,6 +12,10 @@ export interface BridgeConfig {
   port: number;
   reasoning: ReasoningMode;
   vision: VisionMode;
+  /** Built overlay directory to serve at /ui/ (unset → default overlay/dist if present). */
+  uiDir?: string;
+  /** Optional extra browser origin for UI development (validated by createBridge). */
+  uiDevOrigin?: string;
   agentToken: string;
   controlToken: string;
 }
@@ -41,6 +45,11 @@ export function loadBridgeConfig(env: Record<string, string | undefined>): Confi
   // Tokens are required: an empty value is passed through and rejected by createBridge.
   return {
     ok: true,
-    value: { port, reasoning: mode, vision, agentToken: env.SIDEKICK_AGENT_TOKEN ?? '', controlToken: env.SIDEKICK_CONTROL_TOKEN ?? '' },
+    value: {
+      port, reasoning: mode, vision,
+      ...(optional(env.SIDEKICK_UI_DIR) ? { uiDir: optional(env.SIDEKICK_UI_DIR)! } : {}),
+      ...(optional(env.SIDEKICK_UI_DEV_ORIGIN) ? { uiDevOrigin: optional(env.SIDEKICK_UI_DEV_ORIGIN)! } : {}),
+      agentToken: env.SIDEKICK_AGENT_TOKEN ?? '', controlToken: env.SIDEKICK_CONTROL_TOKEN ?? '',
+    },
   };
 }
