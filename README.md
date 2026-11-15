@@ -52,10 +52,37 @@ sidekick-ai/
 │   ├── engineering.md        # Architecture, contracts, privacy, integration seams
 │   ├── phases.md             # Fixed implementation order and exit gates
 │   └── design.md             # Overlay, voice action and debrief UI behavior
-└── [source code to be scaffolded from verified Chert starter]
+├── src/                      # Session engine (mock inputs only — see below)
+│   ├── contracts/            # Shared types + input validation (no Chert types)
+│   ├── sessions/             # In-memory event timeline
+│   ├── recommendations/      # Dedup / cooldown / staleness rules
+│   ├── engine.ts             # SidekickEngine
+│   └── mock/                 # Clearly labeled mock demo scenario
+└── tests/                    # node:test unit tests for the engine
 ```
 
-Do not scaffold a fictional API or impose a repository structure before checking the Chert starter. The proposed source organization in `docs/engineering.md` is **not implemented code**.
+Chert adapter, model adapter, overlay and review generator are **not implemented yet**. The proposed layout for them in `docs/engineering.md` §2 is not code.
+
+## Session engine (implemented, mock-only)
+
+`SidekickEngine` holds session memory in memory only:
+- participants, roles and corrections;
+- goals and decisions;
+- conversation and screen observations;
+- recommendation dedup, cooldown and staleness;
+- voice-request tracking;
+- the timestamped event timeline for the review.
+
+It has **no** Chert, Gemini, UI or speech-playback code. All inputs in tests and the demo are **mock data**. Contracts and integration points: [`docs/engineering.md`](./docs/engineering.md) §3.
+
+Requires Node.js 22 or newer; the team standard is 24 (`.nvmrc`).
+
+```bash
+npm install          # dev dependencies only (typescript, @types/node)
+npm run typecheck    # tsc --noEmit
+npm test             # compile + node:test suite
+npm run demo         # prints the MOCK scenario's timeline (not a live integration)
+```
 
 ## Start here (team and coding assistants)
 
