@@ -57,3 +57,44 @@ recommendation candidate, both condition/context evidence lists populated, no wi
 82 offline tests and strict TypeScript checks pass. The original 80-test results and no-credentials
 statements above describe the earlier implementation verification. Chert and raw media remain untested.
 Credentials stayed in ignored .env and were not printed, staged or committed.
+
+## Gemini vision and clock-skew follow-up (2026-11-15 UTC)
+
+Branch: `codex/gemini-vision`, based on merged main `037229c`.
+
+| Check | Observed result |
+|---|---|
+| Complete engine/coordinator/reasoning/vision suite | 353 passed, 0 failed, 0 skipped on Node v26.13.1 |
+| Root TypeScript and reasoning compatibility checks | Both passed |
+| Real Gemini vision, generated uncovered PNG | clear; visible=true, uncovered=true; 1485 ms |
+| Real Gemini vision, generated covered PNG | clear; visible=true, uncovered=false; 1320 ms |
+| Real Gemini vision, generated obscured PNG | partial; condition facts omitted; 2318 ms |
+| Real Gemini vision, generated unrelated PNG | unknown; condition facts omitted; 2002 ms |
+| First real full uncovered pipeline | Role extracted from synthetic transcript; one engine-approved card with separate screen/context IDs; 5030 ms |
+| Later real full uncovered pipeline | Same supported outcome, 4097 ms |
+| Full covered and obscured pipelines | No recommendations; no provider failures in these two runs |
+| Repeated live requests | Some reasoning `provider_error` and one `vision_failed`; no mock fallback or fabricated card. Earlier failures lacked status diagnostics, so their cause is not established. |
+| Automated lifecycle tests | Pause/end/discard abort the vision request and prevent late ingestion |
+| Automated duplicate test | Three frames yield one recommendation-created event and no voice requests |
+| Automated latency test | Capture time stays unchanged; a 16-second-old result produces no fresh card |
+| Clock skew | 0/1000/5000 ms exact boundaries and +1 ms rejection; invalid configuration rejected; old evidence remains stale |
+| Credential handling | Existing ignored `.env` loaded by Node; no keys printed or copied into this worktree |
+| Git diff whitespace | Passed |
+
+The model was the account-configured `gemini-3.5-flash-lite`. Measurements are
+individual smoke observations, not latency guarantees or an accuracy benchmark.
+PNG fixture generation was visually inspected. The four image-only calls passed;
+the subsequent multi-scene full run was **not entirely successful** because of
+intermittent provider failures. Content-free HTTP/finish-reason diagnostics were
+added afterward; a later uncovered pipeline succeeded. Do not erase the failures
+or label the integration production-ready from these few scenes.
+
+No real Chert, FaceTime, microphone, captured user screen, frontend or private
+speech path was exercised here. Shared ports, session engine, coordinator behavior,
+Chert adapter and overlay source remain unchanged. Sabik still owns adoption of
+clock skew in coordinator selection and supersession. The adapter implements a
+controlled soccer scene profile; arbitrary commercial games remain unverified.
+
+Reproduce with `npm run typecheck`, `npm run test:all`, and the commands in
+[vision.md](vision.md). The new CI workflow runs offline checks only; live provider
+tests require an explicitly configured ignored environment file.

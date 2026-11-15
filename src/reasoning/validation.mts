@@ -46,6 +46,9 @@ export function validateInput(value: unknown): asserts value is ReasoningInput {
   const now = time(value.now);
   integer(value.staleAfterMs, 1);
   if (value.staleAfterMs > 3_600_000) throw Error('Unbounded freshness window');
+  const skew = value.maxClockSkewMs === undefined ? 0 : value.maxClockSkewMs;
+  integer(skew);
+  if (skew > 5000) throw Error('Unbounded clock skew');
   object(value.session);
   const s = value.session;
   text(s.id); integer(s.contextRevision); integer(s.captureGeneration, 1);
@@ -80,8 +83,8 @@ export function validateInput(value: unknown): asserts value is ReasoningInput {
     if (o.sessionId !== s.id || seen.has(o.id) || o.captureGeneration > s.captureGeneration) throw Error('Invalid observation scope');
     seen.add(o.id);
     const observed = time(o.observedAt); const received = time(o.receivedAt);
-    // Conservative: future observations are never allowed to support current advice.
-    if (observed > now || received > now) throw Error('Future evidence');
+    // Only source clocks may differ. receivedAt is produced by the engine's clock.
+    if (observed - now > skew || received > now) throw Error('Future evidence');
     if (o.source === 'transcript') {
       text(o.text, 1000);
       if (o.speakerParticipantId !== undefined && !participantIds.has(o.speakerParticipantId as string)) throw Error('Unknown speaker');

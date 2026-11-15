@@ -149,6 +149,16 @@ environment setting, not a hardcoded default. This test does not establish produ
 - `npm run test:all` runs the compiled engine and integration suite (`npm test`) and then the reasoning suite (`npm run test:reasoning`).
 - No new dependencies.
 
+### Gemini vision implementation
+
+`src/adapters/model/gemini-vision.mts` uses built-in Node fetch and inline image
+bytes with Gemini generateContent REST. The selected model remains explicit in
+the server environment. No image-processing SDK, runtime dependency, Files API,
+database, or Chert method is added. Synthetic PNG fixtures use Node zlib.
+The `Reasoning and vision` workflow runs Node 24 typechecks, engine/coordinator/
+reasoning tests and the offline vision demo without credentials or live API calls.
+See [vision.md](vision.md) for the controlled-scene profile and limitations.
+
 ### HTTP bridge (milestone 2, 2026-11-15)
 
 - Built only on Node built-ins (`node:http`, `node:crypto`) and the global `fetch` in tests. **No new dependencies.**

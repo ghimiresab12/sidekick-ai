@@ -350,7 +350,7 @@ unverified. See docs/reasoning-verification.md for the distinction from earlier 
 - a mock vision adapter;
 - a fake clock and timers.
 
-No HTTP server, Python agent change, Gemini call, Chert call or UI exists yet.
+Milestone 1's own tests use no HTTP server, Python agent, Gemini call, Chert call or UI. The HTTP bridge (milestone 2) and Prabin's Gemini vision adapter (`docs/vision.md`) were added later.
 
 ### Components
 
@@ -389,7 +389,7 @@ No HTTP server, Python agent change, Gemini call, Chert call or UI exists yet.
   - older late frames don't supersede;
   - existing recommendations, including unrelated ones, are never invalidated by this check. It only stops new candidates from a result that is out of date.
 
-  Equivalent frames don't trigger it, so a steady stream of frames showing the same condition doesn't starve advice. **Wiring requirement:** with live Gemini vision, summaries will vary in wording from frame to frame. The production wiring should therefore set `conditionFactKeys` to the facts the vision adapter guarantees. Otherwise every newer frame supersedes, and advice may never appear while frames keep arriving.
+  Equivalent frames don't trigger it, so a steady stream of frames showing the same condition doesn't starve advice. **Wiring requirement:** set `conditionFactKeys` to the facts the vision adapter guarantees. Prabin's Gemini vision adapter emits canonical summaries and both MVP facts only for `clear` frames (`VISION_FACT_KEYS`, see `docs/vision.md`). Without these keys, any change in summary wording counts as superseding, and advice may never appear while frames keep arriving.
 - **Idempotent context application:** checks are made against **current engine state**, re-read before **each** proposal, with no shadow copy. Duplicate proposals in the same response are therefore applied once, and distinct ones are all kept:
   - the same role from the same utterance is not re-applied;
   - a goal with the same text and source is not re-created, even if it was retired;
@@ -413,9 +413,34 @@ The engine admits `observedAt` up to `maxClockSkewMs` (5 s) ahead of its clock. 
 - The coordinator keeps one deadline per period, at the **earliest** excluded `observedAt`. A later future frame never pushes it back, and repeated triggers don't re-create it. When the deadline fires, reasoning runs with that evidence included.
 - With a producer whose clock runs constantly ahead, advice therefore reflects frames up to `maxClockSkewMs` older than the newest received. Future frames are not yet eligible, so they also don't count as superseding.
 
-**Proposed for Prabin's approval (smallest change):** add an optional `maxClockSkewMs` to `ReasoningInput`, defaulting to `0` (today's behaviour). The future-evidence check would become `observedAt > now + maxClockSkewMs`, and freshness rules would be unchanged. The coordinator would pass `engine.config.maxClockSkewMs`, and the per-item exclusion and its skew-sized lag would no longer be needed. Until that is approved, reasoning behaviour is untouched.
+**Reasoning option now available (Prabin, 2026-11-15):** reasoning accepts an optional `maxClockSkewMs` (0–5000 ms, default `0`). See "Approved VisionPort interface" below and `docs/vision.md`. **The coordinator does not pass it yet**, so the per-item exclusion above is still in force. Adopting it requires updating observation selection and supersession together, and is a separate, tested change.
 
 ### Approved VisionPort interface
+
+The implementation uses the existing `VisionPort` unchanged. `createGeminiVision` in
+`src/adapters/model/gemini-vision.mts` accepts an explicit `controlled-soccer-v1`
+profile: a top-down rectangular field, screen-left third outlined in yellow,
+blue circular defenders and red circular opponents. "Uncovered" means no blue
+defender is visibly inside that zone. This is a controlled simulation rule, not
+general soccer tactics, player tracking, or a commercial-game profile.
+
+The model returns only scene/visibility/coverage enums. A local validator maps
+these to bounded canonical summaries and the existing two condition facts.
+Only a fully visible zone with assessable coverage produces `clear` evidence and
+both boolean facts. Partial, occluded, or unrelated scenes cannot produce an
+uncovered claim. Unknown coverage is omitted, never converted to `false`.
+Image text is untrusted data; names, scores and advice are not accepted from vision.
+Frames use inline image bytes with server-only credentials; no files API, URLs,
+raw-frame logging, retention, automatic retries, or mock fallback. Input sizes,
+image signatures, output sizes, cancellation and total request time are bounded.
+Signature checks are format screening, not a full image decoder.
+
+Reasoning now supports optional `maxClockSkewMs` (safe integer 0–5000, default 0).
+Only source `observedAt` gets this tolerance: engine-generated `receivedAt` must
+remain at or before `now`. Original timestamps and freshness windows are unchanged.
+The coordinator's existing clock-wait workaround remains until its owner adopts
+the option in selection and supersession together; this change does not silently
+remove it or alter shared ports. Future source times do not refresh older evidence.
 
 Frame admission is checked before invoking vision: timestamps must parse with the shared
 strict ISO parser and fall between session start minus configured clock skew and the
@@ -429,7 +454,8 @@ Invalid frames must cause zero vision calls. The clock-wait workaround remains u
 - `FrameInput = { captureGeneration, observedAt, image: Uint8Array, mimeType }`, held in memory only and never stored or logged.
 - `ScreenDescription = { summary, evidenceQuality, facts? }`, where `facts` should include `leftZoneVisible` and `leftZoneUncovered` for the MVP rule.
 
-The engine validates the description on ingest. It is not implemented; tests use a mock.
+The engine validates the description on ingest. The Gemini implementation and its synthetic-image
+live checks are documented in `docs/vision.md`; live Chert capture remains unverified.
 
 ### How the Python agent will connect (superseded by "Integration milestone 2 — HTTP bridge" below)
 
@@ -452,7 +478,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 **Status:**
 - **Implemented:** the authenticated localhost HTTP bridge (`src/bridge/http-bridge.ts`) and a runnable entrypoint (`npm run bridge`).
 - **Tested:** in-process HTTP tests against the real coordinator and engine, with Prabin's reasoning module on its **mock** provider and a **mock** `VisionPort`. The real entrypoint was also smoke-tested as a separate process.
-- **Not done:** no Python agent, Chert, live Gemini or UI traffic has gone through it. No vision adapter is configured, so frame uploads return `503 vision_unavailable`.
+- **Not done:** no Python agent, Chert, live Gemini or UI traffic has gone through it. Prabin's Gemini vision adapter exists on `main` (`docs/vision.md`), but **the bridge entrypoint does not wire it in yet**, so frame uploads through `npm run bridge` return `503 vision_unavailable`.
 
 ### Security model
 
@@ -517,7 +543,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 - **Port:** `SIDEKICK_BRIDGE_PORT` (default 8787).
 - **Reasoning:** `SIDEKICK_REASONING=mock` (default, labelled as a mock) or `gemini` (Prabin's adapter via `src/bridge/reasoning-wiring.mts`; requires `GEMINI_API_KEY` and `GEMINI_MODEL`, with **no fallback**).
 - **Fixed settings:** the coordinator uses `conditionFactKeys: ['leftZoneVisible', 'leftZoneUncovered']`, and `engine.sweepAll()` runs every 2 s.
-- **Vision:** none configured.
+- **Vision:** none configured yet. Wiring `createGeminiVision` (per the handoff in `docs/vision.md`) is the next step and is not part of this milestone.
 - **Startup output:** URL, reasoning mode and vision status only, never tokens.
 
 ### Python adapter contract (for Damius — the agent is not modified in this milestone)
@@ -530,7 +556,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 6. **Frames:** `POST /v1/sessions/:id/frames` with the encoded JPEG, PNG or WebP bytes as the body (≤5 MiB) and the two `X-` headers.
    - Send from a background task or queue, never on the audio or call path.
    - Use a client timeout a little above the bridge's 10 s. That deadline counts **upload time too**, so send the complete encoded frame in one request, over the loopback connection.
-   - Keep at most one or two frames in flight, and drop frames rather than queue them without limit.
+   - Keep **at most one frame in flight** and drop frames rather than queue them. Prabin's Gemini vision adapter accepts one request at a time and rejects extras as busy, which the bridge reports as `502 vision_failed`. The bridge's 10 s deadline is shorter than the adapter's own 15 s timeout, so the bridge deadline governs.
    - Sample slower than vision plus reasoning latency.
 7. **Handling responses:**
    - `409 session_not_active`, `consent_required` or `aborted`: stop capturing and re-read capture state.
