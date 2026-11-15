@@ -9,7 +9,7 @@ What it does
     * hands out an immutable ``CaptureContext`` at observation time and requires it for
       every send, so an observation can only ever go to the session, generation and
       timestamp it was captured under;
-    * sends final transcripts and sampled frames, each at most once;
+    * sends final transcripts and sampled JPEG/PNG frames, each at most once;
     * maps every documented bridge response to a small ``Outcome``.
 
 What it never does
@@ -50,8 +50,10 @@ import json
 import logging
 import math
 import os
+import struct
 import time
 import weakref
+import zlib
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -91,6 +93,44 @@ _MAX_GENERATION = 10**16 - 1  # bridge accepts 1..16 digits
 _MIN_TOKEN_CHARS = 32
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _JPEG_MAGIC = b"\xff\xd8\xff"
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _valid_png(image: bytes) -> bool:
+    """Check PNG chunk bounds and checksums before transmitting image bytes."""
+    if not image.startswith(_PNG_MAGIC):
+        return False
+    offset = len(_PNG_MAGIC)
+    chunk_index = 0
+    has_idat = False
+    while offset + 12 <= len(image):
+        length = struct.unpack_from(">I", image, offset)[0]
+        kind_start = offset + 4
+        data_start = offset + 8
+        crc_start = data_start + length
+        chunk_end = crc_start + 4
+        if chunk_end > len(image):
+            return False
+        kind = image[kind_start:data_start]
+        data = image[data_start:crc_start]
+        expected_crc = struct.unpack_from(">I", image, crc_start)[0]
+        if zlib.crc32(kind + data) & 0xFFFFFFFF != expected_crc:
+            return False
+        if chunk_index == 0:
+            if kind != b"IHDR" or length != 13:
+                return False
+            width, height = struct.unpack_from(">II", data)
+            if width == 0 or height == 0:
+                return False
+        elif kind == b"IHDR":
+            return False
+        if kind == b"IDAT":
+            has_idat = True
+        offset = chunk_end
+        chunk_index += 1
+        if kind == b"IEND":
+            return length == 0 and has_idat and offset == len(image)
+    return False
 
 
 class BridgeError(Exception):
@@ -757,9 +797,12 @@ class BridgeClient:
         )
 
     async def send_frame(
-        self, jpeg_bytes: bytes, context: CaptureContext
+        self,
+        jpeg_bytes: bytes,
+        context: CaptureContext,
+        media_source: str = "screen_share",
     ) -> SendResult:
-        """Uploads ONE sampled JPEG frame to the session in ``context``. At most once.
+        """Uploads ONE sampled JPEG or PNG frame to the session in ``context``. At most once.
 
         Returns immediately, without transmitting, with ``BUSY`` if another frame is
         still uploading, ``BACKING_OFF`` after a recent transient failure, and
@@ -773,10 +816,15 @@ class BridgeClient:
         if not isinstance(jpeg_bytes, (bytes, bytearray, memoryview)):
             return SendResult(Outcome.REJECTED, error="invalid_frame")
         size = len(jpeg_bytes)
-        if size == 0 or bytes(jpeg_bytes[:3]) != _JPEG_MAGIC:
+        image_bytes = bytes(jpeg_bytes)
+        is_jpeg = image_bytes.startswith(_JPEG_MAGIC)
+        is_png = _valid_png(image_bytes)
+        if size == 0 or not (is_jpeg or is_png):
             return SendResult(Outcome.REJECTED, error="invalid_frame")
         if size > MAX_FRAME_BYTES:
             return SendResult(Outcome.REJECTED, error="payload_too_large")
+        if media_source not in {"camera", "screen_share"}:
+            return SendResult(Outcome.REJECTED, error="invalid_media_source")
         if context.generation != self._state.generation:
             return SendResult(Outcome.STALE, error="stale_generation")
         if self._frame_in_flight:
@@ -784,7 +832,8 @@ class BridgeClient:
         if self._monotonic() < self._frame_retry_at:
             return SendResult(Outcome.BACKING_OFF, error="backing_off")
         headers = {
-            "Content-Type": "image/jpeg",
+            "Content-Type": "image/jpeg" if is_jpeg else "image/png",
+            "X-Media-Source": media_source,
             "X-Capture-Generation": str(context.generation),
             "X-Observed-At": context.observed_at,
         }
@@ -799,7 +848,7 @@ class BridgeClient:
                     path,
                     context,
                     headers,
-                    bytes(jpeg_bytes),
+                    image_bytes,
                     self._frame_timeout,
                     True,
                     dispatch,

@@ -142,60 +142,39 @@ See the [deploying to production](https://docs.livekit.io/deploy/agents/) guide 
 
 Join the [LiveKit Slack Community](https://livekit.io/join-slack) to get help from the LiveKit team and other developers.
 
-## Sidekick transcript forwarding (entrypoint integration pending)
+## Quiet, consent-gated transcription
 
-`transcript_forwarder.py` is offline-tested infrastructure, not an STT-enabled
-replacement for the current exported `agent.py`. Damius owns that integration.
-Do not treat the existing duplex assistant as quiet-mode Sidekick.
+`src/agent.py` uses LiveKit Agents' STT pipeline with `deepgram/nova-3` through
+LiveKit Inference. It has no LLM, disables room text input/output and recording,
+and speaks only the fixed `Sidekick connected.` greeting through `cartesia/sonic-3`.
+No FaceTime or paid provider call was made to validate this change.
 
-Configure the agent process with `SIDEKICK_BRIDGE_URL=http://127.0.0.1:8787` and
-`SIDEKICK_AGENT_TOKEN`, alongside its existing LiveKit credentials. Never pass the
-Node operator's `SIDEKICK_CONTROL_TOKEN` to Python. Run Node and Python on the same
-host; a container or cloud agent's localhost is not the host bridge. Start Node
-with `SIDEKICK_REASONING=mock SIDEKICK_VISION=none` for local verification.
-The existing `npm run bridge` command builds Node before starting it; use a
-separate workspace if another developer depends on the shared build directory.
+The agent starts with `session.input` disabled. `ConsentGatedSTTRuntime` enables it
+only when the bridge's fresh capture snapshot says the session is active, consented
+and accepting input. On pause, revocation, stale state, auth failure or a new bridge
+session/generation, it disables input first, drops queued transcripts, removes the
+listener and closes that LiveKit session. Resume creates a fresh session; callbacks
+from retired sessions are ignored. The transcript listener is synchronous and sends
+only final, nonempty segments to `TranscriptForwarder.submit_final()`; raw text is
+not logged and uncertain sends are never retried. Speaker IDs are omitted.
 
-The intended synchronous LiveKit event handler is:
+Set `SIDEKICK_BRIDGE_URL=http://127.0.0.1:8787` and `SIDEKICK_AGENT_TOKEN` next to
+`LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`. Python must never receive
+the operator's `SIDEKICK_CONTROL_TOKEN`. Keep Node and Python on the same host;
+localhost in a container or cloud worker is not the developer machine. The model
+IDs use LiveKit Inference and the project's LiveKit credentials; no separate
+Deepgram or Cartesia key is configured. `SIDEKICK_AGENT_VIDEO=off` disables the
+existing synthetic avatar video.
 
-```python
-from sidekick_bridge import BridgeClient
-from transcript_forwarder import TranscriptForwarder
-
-# Inside the async job, before enabling audio input:
-bridge = BridgeClient.from_env()
-await bridge.start(ctx.room.name)
-forwarder = TranscriptForwarder(bridge, max_pending=16)
-forwarder.start()
-
-@session.on("user_input_transcribed")
-def on_transcript(event):
-    forwarder.submit_final(event.transcript, is_final=event.is_final)
-```
-
-`submit_final` captures the exact session/generation/timestamp immediately and
-returns whether it queued the item, NOT whether Node accepted it. Do not wrap this
-callback in `create_task`, capture again in a worker, or retry failed sends.
-Only final, nonempty text of at most 1,000 characters is queued. Overflow drops the
-newest item. One worker owns at most 16 pending items plus one in flight. It does
-not log text, credentials or exception messages. `last_result` is the latest
-content-free BridgeClient result; `failed_count` counts unexpected send exceptions.
-
-The operator must attest all participants agreed before Node accepts input.
-BridgeClient cannot grant consent. The LiveKit adapter must separately keep STT
-input disabled before consent and while paused, ended or capture polling is stale.
-Reset STT streams at lifecycle changes and reject old-stream finals after resume:
-the helper cannot identify pre-pause audio from a late callback. Keep transcripts
-out of room text publication and recordings. Preserve one fixed Chert readiness
-greeting, then remain quiet; this helper creates no speech or model requests.
-
-On pause/end/replacement call `forwarder.clear_pending()` to release queued text.
-Existing same-session contexts retain their original generation; replacement
-sessions cannot receive them. Cancellation cannot undo a POST already accepted by
-Node. Remove the event handler and stop input on shutdown, then await
-`forwarder.close()` followed by `bridge.close()` in a job shutdown hook. The helper
-does not close the caller-owned BridgeClient. Clean up initialization failures too.
-Do not close these resources merely because `session.start()` returned.
+Manual verification must be approved and run separately: start the Node bridge
+with the project's configured reasoning/vision environment, start the Python agent,
+confirm the operator has attested that all participants consented, then verify a
+single spoken sentence arrives in the bridge and that the agent does not reply.
+The agent polls capture state every 0.25 seconds and fails closed on snapshots older
+than 0.75 seconds. Pause or revocation can still take a polling plus watcher interval
+to disable the LiveKit input stream; the Node bridge independently rejects
+observations outside its active generation. An already transmitted request cannot
+be withdrawn after the operator revokes.
 
 ### Offline checks
 

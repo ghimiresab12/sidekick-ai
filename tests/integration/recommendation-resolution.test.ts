@@ -29,6 +29,7 @@ async function setup(options: { reasoning?: ReasoningFn; cooldownMs?: number; se
     captureGeneration: value(engine.getSession(sid)).captureGeneration,
     observedAt: at(seconds), summary: 'Left zone visible and uncovered', evidenceQuality: 'clear',
     facts: { leftZoneVisible: true, leftZoneUncovered: true }, ...over,
+    mediaSource: over.mediaSource ?? 'screen_share',
   }));
   clock.set(2);
   const uncovered = screen(2);
@@ -102,7 +103,7 @@ test('[resolution] an unclear newest screen blocks late covered evidence, includ
 test('[resolution] all clear newest ties may agree, but an incomplete page of ties never resolves', async () => {
   const h = await setup(); h.clock.set(3);
   // Store directly to construct the entire tied batch before asking the coordinator to evaluate it.
-  const input: ScreenInput = { captureGeneration: 1, observedAt: at(3), summary: 'covered', evidenceQuality: 'clear', facts: { leftZoneVisible: true, leftZoneUncovered: false } };
+  const input: ScreenInput = { captureGeneration: 1, observedAt: at(3), summary: 'covered', evidenceQuality: 'clear', facts: { leftZoneVisible: true, leftZoneUncovered: false }, mediaSource: 'screen_share' };
   value(h.engine.ingestScreen(h.sid, input));
   h.covered(3);
   assert.equal(h.current().status, 'resolved');
@@ -165,7 +166,7 @@ for (const transition of ['pause', 'end', 'discard'] as const) {
     const h = await setup();
     // Ordinary observation storage doesn't notify overlay listeners. Arrange for ingest
     // to expire a different card, forcing a notification before resolution is evaluated.
-    const old = value(h.engine.ingestScreen(h.sid, { captureGeneration: 1, observedAt: at(1), summary: 'old screen', evidenceQuality: 'clear' }));
+    const old = value(h.engine.ingestScreen(h.sid, { captureGeneration: 1, observedAt: at(1), summary: 'old screen', evidenceQuality: 'clear', mediaSource: 'screen_share' }));
     value(propose(h.engine, h.sid)(candidate([old.id], { fingerprint: 'another_issue' })));
     let changed = false;
     value(h.engine.subscribe(h.sid, () => {
