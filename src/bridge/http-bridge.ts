@@ -91,8 +91,10 @@ const STATUS: Record<string, number> = {
   aborted: 409,
   timestamp_out_of_range: 422,
   observation_limit_reached: 429,
+  vision_busy: 429,
   vision_failed: 502,
   vision_unavailable: 503,
+  vision_timeout: 504,
 };
 
 /** True if the request declares a body: chunked/other transfer coding, or Content-Length > 0. */

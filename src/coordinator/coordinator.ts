@@ -99,6 +99,12 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
 const newPeriod = (): Period => ({ controller: new AbortController() });
 
+/** Reads a known adapter error code from a thrown value (structural; no adapter import). */
+function visionErrorCode(error: unknown): 'invalid_frame' | 'busy' | 'timeout' | undefined {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return code === 'invalid_frame' || code === 'busy' || code === 'timeout' ? code : undefined;
+}
+
 /** Resolves/rejects with `work`, or rejects as soon as `signal` aborts — whichever is first. */
 function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) {
@@ -364,13 +370,23 @@ export class SidekickCoordinator {
         ),
         signal,
       );
-    } catch {
-      this.#diagnostic({ type: 'vision_failed', sessionId, aborted: signal.aborted });
-      return signal.aborted ? { ok: false, error: 'aborted' } : { ok: false, error: 'vision_failed' };
+    } catch (error) {
+      // Cancellation precedence: pause/end/discard/disconnect/caller deadline is never
+      // reported as a vision or provider failure.
+      if (signal.aborted) {
+        this.#diagnostic({ type: 'vision_failed', sessionId, aborted: true, code: 'unknown' });
+        return { ok: false, error: 'aborted' };
+      }
+      const code = visionErrorCode(error);
+      this.#diagnostic({ type: 'vision_failed', sessionId, aborted: false, code: code ?? 'unknown' });
+      if (code === 'invalid_frame') return { ok: false, error: 'invalid_input', detail: 'image rejected by vision' };
+      if (code === 'busy') return { ok: false, error: 'vision_busy' };
+      if (code === 'timeout') return { ok: false, error: 'vision_timeout' };
+      return { ok: false, error: 'vision_failed' };
     }
     if (signal.aborted) return { ok: false, error: 'aborted' };
     if (!isObject(description)) {
-      this.#diagnostic({ type: 'vision_failed', sessionId, aborted: false });
+      this.#diagnostic({ type: 'vision_failed', sessionId, aborted: false, code: 'unknown' });
       return { ok: false, error: 'vision_failed', detail: 'vision returned no description' };
     }
     const input: ScreenInput = {

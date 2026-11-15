@@ -111,7 +111,9 @@ in this branch. The shared `ReasoningRequest` port is deliberately unchanged.
 
 ## Remaining integration gates
 
-Real Chert frame/transcript ingestion, authenticated bridge, UI wiring, private
-local speech, and live session review still require team integration. This adapter
+Real Chert frame/transcript ingestion, UI wiring, private local speech, and live
+session review still require team integration. (The authenticated bridge now wires
+this adapter when `SIDEKICK_VISION=gemini`; see `engineering.md` "Integration
+milestone 3". That path is tested with mocked Gemini HTTP only.) This adapter
 does not complete those acceptance gates. See `reasoning-verification.md` for
 actual tests and live results rather than treating mocks as live proof.

@@ -112,6 +112,7 @@ async function start(options: Options = {}) {
         res.on('end', () => resolve({ status: res.statusCode ?? 0, text, elapsedMs: Date.now() - started }));
         res.on('error', () => {});
       });
+      req.flushHeaders(); // send headers now, even if no body chunk is ever written
       req.on('error', (e) => {
         if (responded) return; // server closed the connection after answering
         if (opts.destroyAfterMs !== undefined) resolve('destroyed');
@@ -247,9 +248,14 @@ test('missing or wrong tokens are rejected with 401 before the body is processed
     assert.equal(r.headers.get('www-authenticate'), 'Bearer');
   }
   const id = await h.activeSession();
-  const big = await h.api('POST', `/v1/sessions/${id}/frames`, {
-    body: new Uint8Array(1024 * 1024), headers: { 'content-type': 'image/jpeg', 'x-capture-generation': '1', 'x-observed-at': at(1) },
+  // Declare a 1 MiB body but send none: the 401 must come from headers alone. (Uploading the
+  // body for real races the server's early close and can surface as a client ECONNRESET.)
+  const big = await h.raw({
+    method: 'POST', path: `/v1/sessions/${id}/frames`,
+    headers: { 'content-type': 'image/jpeg', 'content-length': String(1024 * 1024), 'x-capture-generation': '1', 'x-observed-at': at(1) },
+    end: false,
   });
+  assert.ok(big !== 'destroyed');
   assert.equal(big.status, 401);
   assert.equal(h.seen.length, 0, 'vision never called');
 }));
@@ -303,8 +309,15 @@ test('malformed JSON bodies: content type, syntax, unknown keys, size', () => wi
   assert.equal((await post({ json: { externalRef: 'r', extra: 1 } })).status, 400);
   assert.equal((await post({ json: [] })).status, 400);
   assert.equal((await post({ json: {} })).status, 400);
-  const big = await post({ json: { externalRef: 'x'.repeat(20_000) } });
-  assert.deepEqual([big.status, big.body!.error], [413, 'payload_too_large']);
+  // Oversized declared length, no body sent: rejected from headers (no client-side write race).
+  const big = await h.raw({
+    method: 'POST', path: '/v1/sessions',
+    headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'application/json', 'content-length': '20000' },
+    end: false,
+  });
+  assert.ok(big !== 'destroyed');
+  assert.equal(big.status, 413);
+  assert.match(big.text, /payload_too_large/);
 }));
 
 test('malformed transcripts: generation type, timestamps, fields', () => withBridge({}, async (h) => {
@@ -500,14 +513,18 @@ test('logs and error bodies contain no transcript text, image bytes, tokens or c
   const id = await h.activeSession();
   h.clock.set(10);
   const failed = await h.transcript(id, { captureGeneration: 1, observedAt: 'bad', text: SECRET_TEXT });
-  assert.ok(!failed.text.includes('555'), 'error body never echoes input');
+  assert.ok(!failed.text.includes('private phone number'), 'error body never echoes input');
   await h.transcript(id, { captureGeneration: 1, observedAt: at(9), text: SECRET_TEXT });
   await h.frame(id, 1, at(9), new TextEncoder().encode('RAW-IMAGE-BYTES'));
   await new Promise((r) => setTimeout(r, 20));
   assert.ok(h.logs.length > 0);
   for (const entry of h.logs) assert.deepEqual(Object.keys(entry).sort(), ['durationMs', 'method', 'route', 'status']);
-  const dump = JSON.stringify(h.logs);
-  for (const secret of ['555', 'RAW-IMAGE', AGENT, CONTROL, id]) assert.ok(!dump.includes(secret), `log leaked ${secret.slice(0, 8)}`);
+  for (const entry of h.logs) assert.equal(typeof entry.durationMs, 'number');
+  // Search only the string fields: a float like durationMs 1.5553 could contain "555" by chance.
+  const dump = JSON.stringify(h.logs.map(({ durationMs: _d, ...strings }) => strings));
+  for (const secret of ['private phone number', '555-0100', 'RAW-IMAGE', AGENT, CONTROL, id]) {
+    assert.ok(!dump.includes(secret), `log leaked ${secret.slice(0, 8)}`);
+  }
   assert.ok(h.logs.some((e) => e.route === '/v1/sessions/:id/frames'), 'route patterns only');
 }));
 

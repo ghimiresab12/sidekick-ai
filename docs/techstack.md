@@ -165,3 +165,8 @@ See [vision.md](vision.md) for the controlled-scene profile and limitations.
 - `npm run bridge` builds the project and starts `dist/src/bridge/main.js`, loading `.env` if present (`--env-file-if-exists`). Requires Node 24.
 - New server-only environment variables (names in `.env.example`): `SIDEKICK_AGENT_TOKEN`, `SIDEKICK_CONTROL_TOKEN`, `SIDEKICK_BRIDGE_PORT` and `SIDEKICK_REASONING`. None of them may appear in browser or overlay code.
 - `tsconfig.reasoning-compat.json` now also type-checks `src/bridge/reasoning-wiring.mts` against Prabin's modules.
+
+### Vision bridge wiring (milestone 3, 2026-11-15)
+
+- `SIDEKICK_VISION` (`none` default, or `gemini`) connects Prabin's existing `src/adapters/model/gemini-vision.mts` to the bridge. It reuses `GEMINI_API_KEY` and `GEMINI_MODEL`, the same model as reasoning.
+- **No new dependencies.** `tsconfig.reasoning-compat.json` already type-checks `src/bridge/*.mts`, including the new `vision-wiring.mts`, against the adapter.

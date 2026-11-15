@@ -32,3 +32,14 @@ test('[B2-2] explicit values are honoured and invalid ones rejected', () => {
   for (const port of ['0', '65536', 'abc', '80.5']) assert.equal(loadBridgeConfig({ SIDEKICK_BRIDGE_PORT: port }).ok, false, port);
   assert.equal(loadBridgeConfig({ SIDEKICK_REASONING: 'openai' }).ok, false);
 });
+
+test('[V] SIDEKICK_VISION: unset/empty → none; gemini accepted; anything else rejected', () => {
+  for (const blank of [undefined, '', '  ']) {
+    const r = loadBridgeConfig({ SIDEKICK_VISION: blank });
+    assert.ok(r.ok);
+    assert.equal(r.value.vision, 'none');
+  }
+  const g = loadBridgeConfig({ SIDEKICK_VISION: ' gemini ' });
+  assert.ok(g.ok && g.value.vision === 'gemini');
+  for (const bad of ['mock', 'openai', 'GEMINI']) assert.equal(loadBridgeConfig({ SIDEKICK_VISION: bad }).ok, false, bad);
+});
