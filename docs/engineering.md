@@ -754,3 +754,17 @@ All of these are server-only.
 - **Roles** outside the demo allowlist always show as `assigned role`, even harmless ones; other games need their positions added deliberately.
 - **Purging:** expired credentials are deleted lazily (when used, or when a pairing is created); until then they are unusable but held in memory.
 - **Voice ownership:** at most one stale record per session can briefly exist (the engine allows one live request per session) until the next live-state update, status call, new explanation or grace timer prunes it.
+
+## Decision update — camera, shared screen, and realtime conversation (2026-11-15)
+
+Product behavior is now defined in `requirements.md` and supersedes the previous private-only speech target where it conflicts. The current implementation is not yet this product: `FrameInput` is implicitly a screen frame, `GeminiVision` only recognizes `controlled-soccer-v1`, and the overlay voice control performs local on-device TTS for one selected recommendation. The Python agent and Chert media interface have not been proven to supply camera frames, shared-screen frames, or bidirectional realtime audio.
+
+Implementation boundary for the next code phase:
+
+1. Add an internal, validated media-source distinction (`camera` versus `screen_share`) at the capture boundary and carry it through model interpretation and evidence. Do not infer source from the image itself.
+2. Keep Chert-specific callbacks and audio/video payload handling in the Python/Chert adapter. Implement only methods and event fields confirmed from the installed starter or a live session; until then use explicit unavailable capability states.
+3. Keep screen coaching text in the companion panel. General camera/screen interpretation needs a separate explicitly selected vision profile; the soccer analyzer must remain narrowly scoped and cannot silently receive arbitrary camera images.
+4. Realtime conversation must use a verified Chert agent audio path. Model the control as disabled/unavailable until join, user speech input, agent speech output, mode-off, and interruption are demonstrated in a real call. Never publish browser TTS into the call as a shortcut.
+5. Until the team decides otherwise, voice-mode activation must disclose that the agent's speech may be heard by all call participants. Camera/screen processing remains active-session-only, consented, and non-retaining by default.
+
+No Chert API method, event schema, or audio routing behavior is asserted by this design update. These are internal requirements pending Phase 0 evidence.

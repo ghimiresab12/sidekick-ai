@@ -93,3 +93,23 @@ The team can demonstrate the **complete live, consented Chert FaceTime path** fr
 - **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
+
+## Decision update — camera coaching and live voice mode (2026-11-15)
+
+This update supersedes earlier private-only voice and gaming-only scope where they conflict:
+
+- Chert is the FaceTime AI participant and conversational voice. During an explicitly consented active call, Sidekick should analyze available camera context for coaching. This does not authorize retaining raw camera video.
+- When a participant shares an app or screen through FaceTime, analyze that shared content and show concise coaching as text in a small companion panel. Keep camera and shared-screen observations distinct and label their source when known.
+- Text is the default. A deliberate voice-mode control enables a live spoken conversation with the Chert agent. It must be opt-in, visibly active, and immediately switchable off. Do not call this live until a real call verifies both audio directions and stop/interruption behavior.
+- Until the team confirms the audience, assume the Chert agent's speech is audible to everyone in the call. Explain this before enabling voice. Do not treat private local TTS as a substitute.
+- Text mode supports ordinary user questions as well as screen coaching. Coaching must cite visible evidence and state uncertainty; generic camera analysis must not be claimed from the current `controlled-soccer-v1` profile.
+- The current controlled soccer scene remains a labeled test fixture. It does not establish general-purpose understanding of arbitrary camera views or screens.
+
+**Acceptance additions:**
+
+- **FR-10 Camera context:** During an active, explicitly consented call, analyze camera context only through a verified Chert media interface. If unavailable, show that camera analysis is unavailable.
+- **FR-11 Shared-screen coaching:** A supported FaceTime screen-share frame reaches vision and yields evidence-grounded text in the companion panel. Camera and screen have distinct source labels and lifecycle handling.
+- **FR-12 Text/live-voice mode:** Text is the default; users can deliberately enable and disable realtime Chert conversation. No live status is shown until verified in an actual call.
+- **FR-13 General questions:** Text questions reach the connected agent; spoken questions and spoken replies work only when the verified realtime voice mode is active. Keep text available when voice is unavailable.
+
+Existing requirements for explicit consent, visible status, stop/pause, event-grounded review, no default raw-media retention, and truthful mock/live labeling still apply. The existing private `Explain with voice` card action may remain a separate feature, but is not the requested live speech-to-speech mode.

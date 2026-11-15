@@ -147,3 +147,11 @@ No full multi-page analytics dashboard, charts with imaginary performance scores
 - **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
+
+## Decision update — text coaching and live voice switch (2026-11-15)
+
+- Default live state remains quiet text coaching in the companion panel, with a clear source label for camera versus shared screen when known.
+- Add a distinct, explicit **Live voice** control. Before activation, tell users that the Chert agent's spoken replies may be audible to everyone on the FaceTime call. Show a persistent active indicator and an immediate **Turn voice off** action.
+- The live-voice control represents a Chert realtime conversation only. Do not reuse the local “Explain with voice” button or browser speech synthesis to simulate it.
+- If Chert realtime audio is not verified or unavailable, disable the control and state that live voice is unavailable; text chat and text coaching remain available.
+- Camera and screen observation status must be independently visible when the adapter can distinguish them. Stop/pause ends both input paths.
