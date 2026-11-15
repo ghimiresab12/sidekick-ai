@@ -236,7 +236,6 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(active.callbacks, {})
         self.assertEqual(self.forwarder.submitted, [])
 
-
     async def test_generation_change_blocks_callback_before_watcher_runs(self) -> None:
         runtime = await self.make_runtime()
         self.authorize()
