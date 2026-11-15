@@ -10,6 +10,7 @@
     "src/**/*.ts",
     "src/reasoning/**/*.mts",
     "src/adapters/model/**/*.mts",
-    "tests/integration/reasoning-wiring.mts"
+    "tests/integration/reasoning-wiring.mts",
+    "src/bridge/**/*.mts"
   ]
 }

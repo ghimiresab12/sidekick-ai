@@ -43,8 +43,8 @@ available locally; fetch `origin feature/session-engine` if necessary.
 
 Gemini interprets normalized screen descriptions/facts and conversation and proposes advice. This
 module does not fetch `frameRef`, ingest raw pixels, transcribe audio, or claim live visual perception.
-Normalized summaries must be supplied upstream. A raw-frame model adapter is a separate integration
-step once the screen pathway is verified.
+Normalized summaries must be supplied upstream. The separate [vision adapter](vision.md) now
+implements this step for the explicitly configured controlled soccer simulation.
 
 ## Contract with Sabik
 
@@ -90,7 +90,9 @@ and include the latest provided screen timestamp. A later unknown frame suppress
 The caller must include the latest relevant screen; this module cannot detect omitted observations.
 
 Freshness uses caller-supplied `staleAfterMs`. The demo's 10 seconds is a fixture setting, not a
-team-wide production choice. Future timestamps are conservatively rejected (no skew tolerance).
+team-wide production choice. Future source timestamps are rejected by default. Optional
+`maxClockSkewMs` accepts safe integers from 0 to 5000 and tolerates only `observedAt`, not
+engine-generated `receivedAt`. Freshness thresholds and original timestamps are unchanged.
 Partial/unknown scene evidence is withheld rather than producing confident suggestions.
 
 `facts.leftZoneVisible` and `facts.leftZoneUncovered` are optional demo rule keys within Sabik's

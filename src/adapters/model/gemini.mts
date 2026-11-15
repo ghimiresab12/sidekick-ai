@@ -7,6 +7,8 @@ export interface GeminiOptions {
   model: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Content-free diagnostics only; never exposes prompts, responses or credentials. */
+  onDiagnostic?: (event: { code: 'http_error' | 'network_error' | 'invalid_response' | 'incomplete_response'; status?: number; finishReason?: 'MAX_TOKENS' | 'SAFETY' | 'OTHER' }) => void;
 }
 
 async function boundedJson(response: Response): Promise<unknown> {
@@ -37,6 +39,9 @@ export function createGeminiProvider(options: GeminiOptions): ReasoningProvider 
   const timeoutMs = options.timeoutMs ?? 15_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) throw Error('Invalid Gemini timeout');
   const send = options.fetchImpl ?? fetch;
+  const report = (event: Parameters<NonNullable<GeminiOptions['onDiagnostic']>>[0]) => {
+    try { options.onDiagnostic?.(event); } catch { /* Diagnostics cannot affect inference. */ }
+  };
   return {
     async generate(input: ReasoningInput, signal?: AbortSignal) {
       const body = JSON.stringify({
@@ -53,23 +58,29 @@ export function createGeminiProvider(options: GeminiOptions): ReasoningProvider 
           method: 'POST', redirect: 'error', signal: requestSignal,
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': options.apiKey }, body
         });
-      } catch { throw Error('Gemini request failed or was cancelled'); }
+      } catch { report({ code: 'network_error' }); throw Error('Gemini request failed or was cancelled'); }
       if (!response.ok) {
         await response.body?.cancel();
+        report({ code: 'http_error', status: response.status });
         // Never expose provider response bodies, headers, prompts or credentials in errors.
         throw Error(`Gemini HTTP ${response.status}`);
       }
-      const data = await boundedJson(response) as {
+      const data = await boundedJson(response).catch(() => { report({ code: 'invalid_response' }); throw Error('Invalid Gemini response'); }) as {
         promptFeedback?: { blockReason?: string };
         candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
       };
-      if (!data || data.promptFeedback?.blockReason || !Array.isArray(data.candidates) || data.candidates.length !== 1) throw Error('Gemini returned no usable candidate');
+      if (!data || data.promptFeedback?.blockReason || !Array.isArray(data.candidates) || data.candidates.length !== 1) { report({ code: 'invalid_response' }); throw Error('Gemini returned no usable candidate'); }
       const candidate = data.candidates[0]!;
-      if (candidate.finishReason !== 'STOP' || !Array.isArray(candidate.content?.parts)) throw Error('Gemini output blocked or incomplete');
+      if (candidate.finishReason !== 'STOP' || !Array.isArray(candidate.content?.parts)) {
+        const finishReason = ['MAX_TOKENS', 'SAFETY', 'OTHER'].includes(candidate.finishReason ?? '')
+          ? candidate.finishReason as 'MAX_TOKENS' | 'SAFETY' | 'OTHER' : undefined;
+        report({ code: 'incomplete_response', ...(finishReason ? { finishReason } : {}) });
+        throw Error('Gemini output blocked or incomplete');
+      }
       const parts = candidate.content.parts.filter(p => p.thought !== true);
-      if (!parts.length || parts.some(p => typeof p.text !== 'string')) throw Error('Gemini returned non-text output');
+      if (!parts.length || parts.some(p => typeof p.text !== 'string')) { report({ code: 'invalid_response' }); throw Error('Gemini returned non-text output'); }
       try { return JSON.parse(parts.map(p => p.text).join('')); }
-      catch { throw Error('Gemini did not return structured JSON'); }
+      catch { report({ code: 'invalid_response' }); throw Error('Gemini did not return structured JSON'); }
     }
   };
 }

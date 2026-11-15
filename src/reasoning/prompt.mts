@@ -13,6 +13,7 @@ Only recommend when the latest screen clearly shows the left defensive zone and 
 conditionObservationIds must reference recent screen observations in the current captureGeneration.
 contextObservationIds are background, e.g. a role assignment. They NEVER refresh condition evidence. The two lists must not overlap.
 Use observedAt, not receivedAt, to decide recency. Withhold when evidence is old, conflicting, incomplete, or unknown.
+Source timestamps may be at most maxClockSkewMs ahead of now. This clock tolerance never extends the staleAfterMs window for old evidence.
 Every evidence ID must exist in this input. Use exact excerpts in evidenceQuotes for ALL cited observations, including EACH contextObservationId as well as EACH conditionObservationId. If condition IDs contain screen-1 and context IDs contain conversation-1, evidenceQuotes MUST contain a quote for screen-1 AND a quote for conversation-1. Check this coverage before returning JSON.
 Use current accepted participant/goal IDs; a same-batch proposed role is not accepted state.
 Use fingerprint left_defense_uncovered. Keep title <=80 characters, shortAdvice <=200. Use tentative wording such as "appears".
@@ -22,7 +23,7 @@ Return uncertainties explaining gaps and empty arrays when insufficient evidence
 /** Explicit allowlist: no raw frame refs, external speaker handles, private engine fields or media. */
 export function promptData(input: ReasoningInput) {
   return {
-    now: input.now, staleAfterMs: input.staleAfterMs,
+    now: input.now, staleAfterMs: input.staleAfterMs, maxClockSkewMs: input.maxClockSkewMs ?? 0,
     session: {
       id: input.session.id, activity: input.session.activity, activityConfirmed: input.session.activityConfirmed,
       contextRevision: input.session.contextRevision, captureGeneration: input.session.captureGeneration,
