@@ -1,0 +1,92 @@
+# Sidekick AI
+
+**HackUTA 2026 · Chert — Best Use of FaceTime · Team of 4**  
+**Status:** Product decisions agreed; Chert runtime integration and implementation choices pending verification.
+
+> **Sidekick is a context-aware AI teammate for group FaceTime calls.** During an explicitly started, consented session it observes shared-screen activity and conversation context, proactively offers **quiet text advice in an overlay**, explains a **selected recommendation with voice only when someone presses its button**, and produces an **evidence-based end-of-session review**.
+
+## Product in one sentence
+
+**Observe → Understand → Remember → Recommend quietly → Explain on demand → Review afterward.**
+
+Sidekick is not merely a screen describer, a chatbot waiting for questions, a generic travel planner, or a copy of a game-master template. It relates the group's **previously stated goals and roles** to **new visual observations**, notices changes that matter, and helps without interrupting gameplay.
+
+## Settled experience
+
+1. Participants explicitly start a session and consent to continuous conversation/screen processing while it is active; there is a visible active-state and a **Stop** control.
+2. Sidekick receives available FaceTime audio/transcripts and the participant's shared-screen content, and maintains temporary group context. The team has **confirmed the possibility of incoming FaceTime screen sharing with Chert**; its actual API/frame interface still requires a live test.
+3. It proposes an activity based on screen and conversation, then **asks for confirmation or correction** (gaming in the hackathon demo).
+4. It generates short, proactive **text-only recommendation cards** in an **overlay**. It never speaks merely because it detected an issue; suppress repeated or stale advice.
+5. Selecting **Explain with voice** on a specific card triggers one more detailed spoken explanation via the current FaceTime agent, then returns to quiet output. A player may cancel if supported.
+6. **End session → Review** creates a debrief from recorded events: key moments, strengths, weaknesses, decisions, recommendations, and next actions. Do not invent telemetry or outcomes.
+
+**Continuous input does not mean full-frame-rate AI inference.** Sample or throttle observations as required for performance. Quiet mode controls **output**, not audio capture; participants must be told that the session continuously processes audio.
+
+## Hackathon MVP: gaming
+
+**Demonstration story:** Two or more people and Sidekick join a group FaceTime call. A participant says, “Alex is responsible for left defense.” The group shows a soccer game or controlled field simulation through FaceTime screen sharing. When the visible defender leaves the left zone, Sidekick remembers the assignment and displays: **“Left defense appears exposed. Have Alex drop back or arrange cover.”** A player selects the card and presses **Explain with voice**. Sidekick explains the observed issue and tactical options on the call. At session end the debrief reflects the actual detected event and recommendation.
+
+Use a **controlled, clearly labeled soccer-field simulation or single well-chosen game scene** if commercial-game tracking is too unreliable. A simulation may simplify the visual scene, but **do not simulate the Chert FaceTime connection or pass prerecorded outputs off as live**.
+
+### Acceptance gate
+
+A real FaceTime session conveys a spoken assignment and actual shared visual context; one recommendation uses **both**; the text card is visible; selected-card voice explanation plays (if the verified Chert voice interface supports it); session end produces an evidence-backed debrief. The live/fallback boundary must be disclosed clearly.
+
+## Longer-term applications (not hackathon scope)
+
+- **Trip planning:** Remember participants' budgets/interests, interpret shared destinations, flag incompatibilities.
+- **Social interaction:** Suggest common-interest topics and activities, respecting user preferences and context.
+- **Collaborative work:** Keep track of agreed tasks and screen-visible obstacles.
+
+All of these use the **same session/context/recommendation engine**, not separate independent agents. **Gaming is the only required MVP use case.**
+
+## Project structure
+
+```text
+sidekick-ai/
+├── README.md                 # Product, demo, setup (this document)
+├── CLAUDE.md                 # Short AI-assistant instructions / doc router
+├── docs/
+│   ├── requirements.md       # Settled product requirements and testable acceptance
+│   ├── techstack.md          # Confirmed vs provisional tech decisions
+│   ├── engineering.md        # Architecture, contracts, privacy, integration seams
+│   ├── phases.md             # Fixed implementation order and exit gates
+│   └── design.md             # Overlay, voice action and debrief UI behavior
+└── [source code to be scaffolded from verified Chert starter]
+```
+
+Do not scaffold a fictional API or impose a repository structure before checking the Chert starter. The proposed source organization in `docs/engineering.md` is **not implemented code**.
+
+## Start here (team and coding assistants)
+
+1. Read [`CLAUDE.md`](./CLAUDE.md), then [`docs/requirements.md`](./docs/requirements.md).
+2. Follow [`docs/phases.md`](./docs/phases.md) to work on the **earliest unblocked milestone**.
+3. Use [`docs/engineering.md`](./docs/engineering.md) for internal contracts and [`docs/techstack.md`](./docs/techstack.md) before adding a dependency.
+4. For the overlay and debrief only, consult [`docs/design.md`](./docs/design.md).
+5. Start Chert integration from the sponsor-provided instructions: <https://app.trychert.com/skills.md>. Treat actual starter code and observed behavior—not invented endpoint names—as authoritative for external API details.
+6. Put credentials in local ignored environment files, provide an `.env.example` after names are verified, and **never commit real secrets or conversation recordings**.
+
+## Four-person coordination
+
+| Owner | Primary workstream | First proof |
+| --- | --- | --- |
+| A — Chert integration | Group FaceTime, audio/screen ingestion, live spoken response | Actual call receives screen + speech; can respond |
+| B — Context/session | Participant roles, activity, event models, session lifecycle | Spoken role persists into later observation |
+| C — Reasoning | Vision interpretation, tactical rule, recommendation generation/dedup | Screen change yields one grounded card |
+| D — UI/review/integration | Overlay, selected voice-button action, review, demo testing | Card click and end-of-session debrief work end-to-end |
+
+Agree on the internal event contracts **before parallel work**; designate one integrator. Use short feature branches and frequent merges to a stable shared branch; avoid modifying each other's modules without coordination.
+
+## Scope and authenticity
+
+**Must protect:** Chert FaceTime authenticity, meaningful shared-screen understanding, remembered context, quiet recommendations, selected voice explanation, and review. **Cut first:** iMessage, browser extension (unless needed as a verified fallback), full dashboard, persistent DB, Docker, advanced CI/CD, additional games/modes, invented statistics.
+
+For a missed/unsupported Chert capability, report the limitation and demonstrate a clearly labeled fallback; never call a browser panel a native FaceTime overlay or claim that an unsupported voice path works.
+
+## Competition references
+
+- Chert track: <https://www.trychert.com/uta>
+- Chert integration setup: <https://app.trychert.com/skills.md>
+- Team-supplied HackUTA 2026 presentation (general criteria: robustness, creativity, Odyssey theme; published schedule requires verification)
+
+**Do not trust dates in this README without checking the event dashboard.** The team presentation lists Devpost submission at **Saturday 11:59 PM**, a roughly 12-hour hacking period, and a **3-minute presentation + 2-minute Q&A** format. Build a repeatable, truthful three-minute demonstration; submit before the published cutoff.

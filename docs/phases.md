@@ -1,0 +1,105 @@
+# Sidekick AI — Phases and Build Order
+
+**Purpose:** Shared fixed roadmap for four developers and their AI coding assistants. This describes intended work; **no unchecked step is claimed implemented**. Track active owners/tasks in GitHub Issues or a team board instead of rewriting the roadmap after every commit.
+
+**Priority:** Prove real Chert group FaceTime + screen and conversation context **first**; then implement quiet recommendation, selected voice explanation, and event review. The overlay and review are part of the agreed MVP but may be simplified visually. Do not build unrelated systems to fill time.
+
+## Phase 0 — Shared contracts and Chert proof (critical path)
+
+- [ ] Agree that `docs/requirements.md` defines product scope, `docs/engineering.md` defines internal contracts, `docs/techstack.md` defines dependencies, `docs/design.md` defines UI, and this file defines order.
+- [ ] Inspect Chert's official starter: <https://app.trychert.com/skills.md>. Record actual language, project layout, authentication and SDK methods. Do not invent methods.
+- [ ] Establish a **real group FaceTime call** with the agent.
+- [ ] Prove **incoming FaceTime screen-share observations** reach the agent as frames/supported media, as separately confirmed possible by the team.
+- [ ] Prove speech/transcript access; determine whether participant identity is included.
+- [ ] Prove an external trigger can generate **in-call spoken output** during an active call (the future voice button path).
+- [ ] On target gaming computer, determine feasible overlay approach; test drawing one static text card over a game or document honest fallback.
+- [ ] Record confirmed integration and gaps in `engineering.md`; finalize language/AI model in `techstack.md` only after evidence.
+- [ ] Agree normalized `Session`, `Observation`, `Recommendation`, `SessionEvent` contracts and one concrete gaming demo scene.
+
+**Exit gate:** Real FaceTime works, screen + conversation inputs are understood, voice-output trigger and overlay path are characterized. All four members have stable interfaces. If a critical Chert path fails, do not build a pretend native demo: disclose and choose a genuine fallback while continuing to investigate.
+
+## Phase 1 — Context and observation (in parallel after contracts)
+
+- [ ] Implement Chert adapter with only **verified** API interfaces.
+- [ ] Implement consent, `starting/active/paused/ended` session lifecycle, and activity suggestion + user confirmation.
+- [ ] Normalize speech events and store explicit player roles/goal; allow corrections and unknown speaker ID.
+- [ ] Normalize sampled screen observations with timestamps and ephemeral evidence references.
+- [ ] Use one model adapter to create structured scene descriptions, then deterministic tactical rules to evaluate **one** testable issue (left defensive coverage).
+- [ ] Add pure tests for role correction, wrong-session isolation, stopped sessions and out-of-order frames.
+
+**Exit gate:** A real spoken role persists in session state and a real shared screen produces one reliable structured tactical observation.
+
+## Phase 2 — Quiet, proactive recommendation path
+
+- [ ] Convert tactical state change into a short, actionable text recommendation with evidence links.
+- [ ] Add deduplication and staleness checks so repeated frames do not spam the interface.
+- [ ] Implement minimal visible **text overlay** on the actual target computer; static local UI acceptable before live wiring.
+- [ ] Send recommendations to overlay; keep **all automatic speech disabled**.
+- [ ] Add card dismissal and a minimal history if time permits; store creation in session events.
+
+**Exit gate:** Without being asked a second question, a relevant visual change produces **one** accurate text-only recommendation. No unsolicited voice occurs.
+
+## Phase 3 — Selected recommendation voice
+
+- [ ] Attach **Explain with voice** to an individual card's stable recommendation ID.
+- [ ] Fetch that card's original evidence, roles and goals; handle stale cards honestly.
+- [ ] Generate one concise deeper explanation: observation → significance → action.
+- [ ] Route explanation through **verified Chert in-call speech output** and record delivery state.
+- [ ] Return to Quiet Mode after speech; avoid overlapping requests and support cancellation when possible.
+- [ ] If voice route unavailable, show detailed text as **explicit fallback** and record that the P0 voice requirement is incomplete.
+
+**Exit gate:** Clicking a selected card produces the expected audible explanation in the *same* live FaceTime call; no auto-coaching.
+
+## Phase 4 — Event timeline and end review
+
+- [ ] Maintain minimal timestamped events as observations/advice/voice requests occur; do not store raw media by default.
+- [ ] Implement **End Session** that stops processing before review.
+- [ ] Add **Generate Review** and **Discard**; structured summary includes key moments, observed strengths/weaknesses, advice and next actions.
+- [ ] Check summaries do not invent player scores, match results or unobserved resolutions; represent unknowns.
+- [ ] Render concise review UI with evidence-linked timeline; avoid a full analytics dashboard.
+
+**Exit gate:** Ended session yields a repeatable truthful report entirely grounded in events; session can be discarded.
+
+## Phase 5 — Integration, robustness, and judge demo
+
+- [ ] Test entire path **Start/consent → spoken assignment → screen event → overlay text → chosen voice → End → Review** at least twice.
+- [ ] Test no-screen, bad audio, wrong role, delayed frame, missing speaker label, failed AI, voice unavailable, stop/pause, and no-events review.
+- [ ] Verify no secrets, private recordings, or raw identifiable call contents committed to repository.
+- [ ] Use controlled soccer simulation if needed; show that **input really comes from live screen sharing**, not a generated test fixture, during judged demo.
+- [ ] Prepare a three-minute explanation; distinguish actual live features from simulator/mocks/fallback. Add truthful screenshots and backup recording.
+- [ ] Verify event dashboard/submission instructions and submit ahead of Devpost cutoff.
+
+**Exit gate:** Stable live FaceTime demonstration, supported factual claims, runnable setup instructions, and complete judging assets.
+
+## Team ownership (suggested, adjustable)
+
+| Developer | Primary module | Handoff / acceptance |
+|---|---|---|
+| A | Chert call/audio/video/voice adapter | Live event shapes and tested output interface |
+| B | Session coordinator + memory | Validated role/goal/event objects available to reasoning |
+| C | Visual model + tactical rules + dedup | Grounded observation yields exactly one advice event |
+| D | Overlay + voice selection UI + review + demo | Working chosen-card interaction and event review |
+
+**One integrator** coordinates merges and tests the full path. Share interface examples early. Keep `main` demo-stable and use short-lived feature branches; exact branch policy is a team preference, not a product requirement.
+
+## Scope cuts when blocked
+
+1. Cut rich styling, animations, historical analytics, advanced state visualization.
+2. Cut iMessage, generic “Engineer Mode,” travel/social MVP, multiple games, long-term memory.
+3. Cut full dashboard, browser extension **unless necessary for actual media capture**, Postgres, Docker Compose, elaborate deployment and CI.
+4. Keep context + real observed video → **quiet text card** as the core novelty. Pursue selected voice and review via their smallest working interfaces; if a P0 integration is unsupported, label it honestly rather than claiming full completion.
+
+## Schedule warning
+
+The team-supplied HackUTA slides describe a Saturday 12 PM–midnight hacking window, Devpost due **Saturday 11:59 PM**, and Sunday judging with **3 minutes + 2 minutes Q&A**. This is not a newly verified live schedule; check organizer announcements immediately. Use time remaining for the critical path, not a rigid six-hour timeline from Dami's separate PITWALL proposal.
+
+## Outstanding proof register
+
+- [ ] CH-1 — real Chert group call
+- [ ] CH-2 — screen-share frames available in agent
+- [ ] CH-3 — continuous transcript/audio, speaker attribution behavior
+- [ ] CH-4 — click-triggered voice on current call
+- [ ] CH-5 — actual overlay on target device
+- [ ] CH-6 — stop processing and generate review from events
+
+Record observed evidence, tested platform, owner, and status in issues or `engineering.md`. Product decisions are settled; **interface support is not**.
