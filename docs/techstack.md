@@ -158,3 +158,10 @@ database, or Chert method is added. Synthetic PNG fixtures use Node zlib.
 The `Reasoning and vision` workflow runs Node 24 typechecks, engine/coordinator/
 reasoning tests and the offline vision demo without credentials or live API calls.
 See [vision.md](vision.md) for the controlled-scene profile and limitations.
+
+### HTTP bridge (milestone 2, 2026-11-15)
+
+- Built only on Node built-ins (`node:http`, `node:crypto`) and the global `fetch` in tests. **No new dependencies.**
+- `npm run bridge` builds the project and starts `dist/src/bridge/main.js`, loading `.env` if present (`--env-file-if-exists`). Requires Node 24.
+- New server-only environment variables (names in `.env.example`): `SIDEKICK_AGENT_TOKEN`, `SIDEKICK_CONTROL_TOKEN`, `SIDEKICK_BRIDGE_PORT` and `SIDEKICK_REASONING`. None of them may appear in browser or overlay code.
+- `tsconfig.reasoning-compat.json` now also type-checks `src/bridge/reasoning-wiring.mts` against Prabin's modules.

@@ -350,7 +350,7 @@ unverified. See docs/reasoning-verification.md for the distinction from earlier 
 - a mock vision adapter;
 - a fake clock and timers.
 
-No HTTP server, Python agent change, Gemini call, Chert call or UI exists yet.
+Milestone 1's own tests use no HTTP server, Python agent, Gemini call, Chert call or UI. The HTTP bridge (milestone 2) and Prabin's Gemini vision adapter (`docs/vision.md`) were added later.
 
 ### Components
 
@@ -389,7 +389,7 @@ No HTTP server, Python agent change, Gemini call, Chert call or UI exists yet.
   - older late frames don't supersede;
   - existing recommendations, including unrelated ones, are never invalidated by this check. It only stops new candidates from a result that is out of date.
 
-  Equivalent frames don't trigger it, so a steady stream of frames showing the same condition doesn't starve advice. **Wiring requirement:** with live Gemini vision, summaries will vary in wording from frame to frame. The production wiring should therefore set `conditionFactKeys` to the facts the vision adapter guarantees. Otherwise every newer frame supersedes, and advice may never appear while frames keep arriving.
+  Equivalent frames don't trigger it, so a steady stream of frames showing the same condition doesn't starve advice. **Wiring requirement:** set `conditionFactKeys` to the facts the vision adapter guarantees. Prabin's Gemini vision adapter emits canonical summaries and both MVP facts only for `clear` frames (`VISION_FACT_KEYS`, see `docs/vision.md`). Without these keys, any change in summary wording counts as superseding, and advice may never appear while frames keep arriving.
 - **Idempotent context application:** checks are made against **current engine state**, re-read before **each** proposal, with no shadow copy. Duplicate proposals in the same response are therefore applied once, and distinct ones are all kept:
   - the same role from the same utterance is not re-applied;
   - a goal with the same text and source is not re-created, even if it was retired;
@@ -413,9 +413,9 @@ The engine admits `observedAt` up to `maxClockSkewMs` (5 s) ahead of its clock. 
 - The coordinator keeps one deadline per period, at the **earliest** excluded `observedAt`. A later future frame never pushes it back, and repeated triggers don't re-create it. When the deadline fires, reasoning runs with that evidence included.
 - With a producer whose clock runs constantly ahead, advice therefore reflects frames up to `maxClockSkewMs` older than the newest received. Future frames are not yet eligible, so they also don't count as superseding.
 
-**Proposed for Prabin's approval (smallest change):** add an optional `maxClockSkewMs` to `ReasoningInput`, defaulting to `0` (today's behaviour). The future-evidence check would become `observedAt > now + maxClockSkewMs`, and freshness rules would be unchanged. The coordinator would pass `engine.config.maxClockSkewMs`, and the per-item exclusion and its skew-sized lag would no longer be needed. Until that is approved, reasoning behaviour is untouched.
+**Reasoning option now available (Prabin, 2026-11-15):** reasoning accepts an optional `maxClockSkewMs` (0–5000 ms, default `0`). See "Approved VisionPort interface" below and `docs/vision.md`. **The coordinator does not pass it yet**, so the per-item exclusion above is still in force. Adopting it requires updating observation selection and supersession together, and is a separate, tested change.
 
-### Vision interface (accepted for Gemini implementation)
+### Approved VisionPort interface
 
 The implementation uses the existing `VisionPort` unchanged. `createGeminiVision` in
 `src/adapters/model/gemini-vision.mts` accepts an explicit `controlled-soccer-v1`
@@ -457,7 +457,7 @@ Invalid frames must cause zero vision calls. The clock-wait workaround remains u
 The engine validates the description on ingest. The Gemini implementation and its synthetic-image
 live checks are documented in `docs/vision.md`; live Chert capture remains unverified.
 
-### How the Python agent will connect (next milestone, not implemented)
+### How the Python agent will connect (superseded by "Integration milestone 2 — HTTP bridge" below)
 
 The Python LiveKit agent will POST normalized events to an authenticated localhost HTTP bridge, which calls the coordinator. It will **not** call the engine directly. The flow:
 1. **Session:** on job start, `createSession({ externalRef: <room name> })`. Lifecycle (start, pause, resume, end) comes from the companion UI, not from the agent.
@@ -472,3 +472,96 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 - Chert's handling of screen share is unverified; its starter page mentions only camera tracks.
 - Whether the greeting is mandatory is unverified (Damius, real call).
 - Gemini latency for vision plus reasoning within the stale window is unmeasured.
+
+## Integration milestone 2 — HTTP bridge (implemented 2026-11-15, tested locally with mocks)
+
+**Status:**
+- **Implemented:** the authenticated localhost HTTP bridge (`src/bridge/http-bridge.ts`) and a runnable entrypoint (`npm run bridge`).
+- **Tested:** in-process HTTP tests against the real coordinator and engine, with Prabin's reasoning module on its **mock** provider and a **mock** `VisionPort`. The real entrypoint was also smoke-tested as a separate process.
+- **Not done:** no Python agent, Chert, live Gemini or UI traffic has gone through it. Prabin's Gemini vision adapter exists on `main` (`docs/vision.md`), but **the bridge entrypoint does not wire it in yet**, so frame uploads through `npm run bridge` return `503 vision_unavailable`.
+
+### Security model
+
+- Binds to **127.0.0.1 only**. It is never exposed publicly and has no setting to listen on other interfaces.
+- Refuses any request with an `Origin` header (no browser access and no CORS yet), and any `Host` other than `127.0.0.1:<port>` or `localhost:<port>`, which guards against DNS rebinding.
+- **Two bearer tokens**, both ≥32 characters and different from each other, compared in constant time and never logged:
+
+| Token | Holder | Routes |
+|---|---|---|
+| `SIDEKICK_AGENT_TOKEN` | Python agent | create session, read capture state, send transcripts and frames |
+| `SIDEKICK_CONTROL_TOKEN` | Trusted operator / future UI backend (**never browser code**) | consent, pause, resume, end, discard, read capture state |
+
+  The agent **cannot grant consent**. A missing or invalid token gets `401`, and a valid token on the wrong route gets `403`.
+- Route, method, token, content type and declared length are all checked from **headers, before any body is read**. Bodies are also size-capped while streaming: JSON at 16 KiB; frames at `maxFrameBytes`, at most 5 MiB (the coordinator ceiling), configurable lower.
+- Nothing is persisted or logged. The optional `onRequestLog` hook receives only `{method, route pattern, status, durationMs}`. Error bodies are `{ok:false, error:<code>}` and never echo input.
+
+### Routes (`/v1`)
+
+| Method and path | Token | Body | Calls | Success |
+|---|---|---|---|---|
+| `GET /v1/health` | none | — | — | `200 {ok:true}` |
+| `POST /v1/sessions` | agent | `{externalRef}` (room name) | `createSession` | `201` new / `200` existing non-ended session for that room |
+| `GET /v1/sessions/:id/capture` | either | — | engine read | `{sessionId, status, consentGiven, captureGeneration, acceptingInput}` |
+| `POST /v1/sessions/:id/transcripts` | agent | JSON `{captureGeneration, observedAt, text, speakerRef?}` (no other keys) | `ingestConversation` | `202 {observationId, captureGeneration, observedAt}` |
+| `POST /v1/sessions/:id/frames` | agent | raw `image/jpeg\|png\|webp` bytes; headers `X-Capture-Generation`, `X-Observed-At` | `ingestFrame` (awaits vision) | `200 {observationId, captureGeneration, observedAt}` |
+| `POST /v1/sessions/:id/consent` | control | exactly `{"consent": true}` | `startWithConsent` | `200` lifecycle view |
+| `POST /v1/sessions/:id/pause` / `resume` / `end` | control | **none** (any declared body is rejected) | `pause` / `resume` / `end` | `200` lifecycle view |
+| `DELETE /v1/sessions/:id` | control | **none** | `discard` | `204` |
+
+**Status codes:**
+
+| Status | Codes |
+|---|---|
+| 400 | `invalid_input`, `invalid_json`, `invalid_timestamp`, malformed `invalid_generation`, `explicit_consent_required`, `unexpected_body` |
+| 401 | `unauthorized` |
+| 403 | `forbidden`, `forbidden_origin`, `forbidden_host` |
+| 404 | `not_found`, `session_not_found` |
+| 405 | `method_not_allowed` |
+| 409 | `consent_required`, `session_not_active`, `invalid_transition`, lifecycle `invalid_generation`, `stale_evidence`, `aborted` |
+| 413 | `payload_too_large` |
+| 415 | `unsupported_media_type` |
+| 422 | `timestamp_out_of_range` |
+| 429 | `observation_limit_reached` |
+| 502 | `vision_failed` |
+| 503 | `vision_unavailable` |
+| 504 | `vision_timeout` |
+
+### Capture metadata, timeouts and cancellation
+
+- `X-Capture-Generation` and `X-Observed-At` are read from headers **before** the frame body is read, then passed unchanged through `ingestFrame`. The coordinator snapshots them before awaiting vision. Responses return the stored values; `observedAt` is normalized to UTC but is the same instant.
+- **One deadline per frame request** (`frameTimeoutMs`, default 10 s) covers **body upload and vision together** (revised after review). The body reader watches the same cancellation signal, so an upload that stalls or trickles is cut off at the deadline. Buffered image chunks are released, the response is `504 vision_timeout`, and the connection is closed. If the client has already disconnected, cleanup runs and no response is attempted. Separately, the coordinator's `ingestFrame` accepts an optional caller `signal`. The bridge aborts it on **timeout** and on **client disconnect**, and pause, end and discard abort it through the coordinator's period signal. **An aborted frame is never ingested**, even if vision finishes later.
+- The coordinator **races the vision call against the signal**, so cancellation returns immediately even if an adapter ignores `signal` (changed in this milestone; regression-tested in `tests/integration/frame-cancellation.test.ts`).
+- Requests are independent: several frames may be in flight at once, so the agent never has to block on one.
+- **Bodyless routes** (`health`, `capture`, `pause`, `resume`, `end`, `DELETE`) reject any declared body, whether `Content-Length` > 0 or any `Transfer-Encoding` including chunked, with `400 unexpected_body`. The body is never read and the connection is closed, so a never-ending chunked body can't stall the server, and session state is unchanged. Authentication still runs first.
+- Every request has a permanent stream-error guard, so a late `ECONNRESET` after the bridge stopped reading can't crash the process. Each response is sent at most once.
+
+### Entrypoint (`npm run bridge`)
+
+`src/bridge/main.ts` loads `.env` if present.
+- **Required:** `SIDEKICK_AGENT_TOKEN` and `SIDEKICK_CONTROL_TOKEN`; startup fails closed (exit 1) without valid ones.
+- **Optional variables that are unset, empty or whitespace-only use their defaults** (`src/bridge/config.ts`), so a copied `.env.example` with blank optional lines starts normally.
+- **Port:** `SIDEKICK_BRIDGE_PORT` (default 8787).
+- **Reasoning:** `SIDEKICK_REASONING=mock` (default, labelled as a mock) or `gemini` (Prabin's adapter via `src/bridge/reasoning-wiring.mts`; requires `GEMINI_API_KEY` and `GEMINI_MODEL`, with **no fallback**).
+- **Fixed settings:** the coordinator uses `conditionFactKeys: ['leftZoneVisible', 'leftZoneUncovered']`, and `engine.sweepAll()` runs every 2 s.
+- **Vision:** none configured yet. Wiring `createGeminiVision` (per the handoff in `docs/vision.md`) is the next step and is not part of this milestone.
+- **Startup output:** URL, reasoning mode and vision status only, never tokens.
+
+### Python adapter contract (for Damius — the agent is not modified in this milestone)
+
+1. **Configuration:** the agent needs `SIDEKICK_BRIDGE_URL` (e.g. `http://127.0.0.1:8787`) and `SIDEKICK_AGENT_TOKEN` from its own server environment. It never sees the control token.
+2. **Job start:** `POST /v1/sessions {"externalRef": <room name>}` returns a `sessionId` with `status: "starting"`. Calling again for the same room returns the same session, so restarts are safe.
+3. **Before capturing anything:** read `GET /v1/sessions/:id/capture`. Capture and send **only while `acceptingInput` is true**. Consent and lifecycle come from the control side.
+4. **At capture time:** record `captureGeneration` (from the latest capture-state read) and `observedAt` (your capture timestamp, ISO 8601 with a timezone). Carry both unchanged with that item; never re-read them when sending.
+5. **Transcripts:** `POST /v1/sessions/:id/transcripts` with JSON. Set `speakerRef` only if LiveKit speaker attribution is verified.
+6. **Frames:** `POST /v1/sessions/:id/frames` with the encoded JPEG, PNG or WebP bytes as the body (≤5 MiB) and the two `X-` headers.
+   - Send from a background task or queue, never on the audio or call path.
+   - Use a client timeout a little above the bridge's 10 s. That deadline counts **upload time too**, so send the complete encoded frame in one request, over the loopback connection.
+   - Keep **at most one frame in flight** and drop frames rather than queue them. Prabin's Gemini vision adapter accepts one request at a time and rejects extras as busy, which the bridge reports as `502 vision_failed`. The bridge's 10 s deadline is shorter than the adapter's own 15 s timeout, so the bridge deadline governs.
+   - Sample slower than vision plus reasoning latency.
+7. **Handling responses:**
+   - `409 session_not_active`, `consent_required` or `aborted`: stop capturing and re-read capture state.
+   - `409 stale_evidence` / `invalid_generation`: drop the item and refresh the generation.
+   - `503`, `502`, `504`: drop the frame and keep going, with no tight retry loop.
+   - `401` / `403`: configuration error; stop.
+   - Lifecycle and capture-state requests must carry **no body** (`400 unexpected_body` otherwise).
+8. **Never:** log or persist frames, audio, transcript text or tokens, and never publish audio into the call (see the requirements).

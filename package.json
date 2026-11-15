@@ -16,7 +16,8 @@
     "test": "npm run build && node --test \"dist/tests/**/*.test.js\"",
     "demo": "npm run build && node dist/src/mock/run-demo.js",
     "test:reasoning": "node --test \"tests/reasoning/*.test.mjs\"",
-    "test:all": "npm test && npm run test:reasoning"
+    "test:all": "npm test && npm run test:reasoning",
+    "bridge": "npm run build && node --env-file-if-exists=.env dist/src/bridge/main.js"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
