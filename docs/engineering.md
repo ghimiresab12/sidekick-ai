@@ -845,3 +845,40 @@ the avatar prevents joining, report that as a live blocker and review the minima
 video prerequisite separately; do not silently restore it. The fixed audio greeting
 is preserved, but Chert acknowledgement and line_unacknowledged recovery remain
 external integration risks. This milestone proves no screen ingestion or advice card.
+
+### Video-track metadata diagnostic (opt-in, offline-tested, live verification pending)
+
+`agent/src/video_diagnostic.py` answers the open CH-2 question: how Chert exposes
+FaceTime video to the LiveKit room. It is OFF unless `SIDEKICK_VIDEO_DIAGNOSTIC=1`;
+with the flag unset the STT-only entrypoint is unchanged. It is not a frame path.
+
+When enabled, the entrypoint calls `ctx.connect(auto_subscribe=AUDIO_ONLY)` before
+the STT runtime starts, so the SDK does not subscribe to video on its own, then logs
+one sanitized `video_track_diagnostic {json}` line per event: tracks already
+published, `track_published` / `track_unpublished`, `track_subscribed` /
+`track_unsubscribed`, `track_subscription_failed`, `track_muted` / `track_unmuted`
+and consent-gate changes. Fields: a per-process salted one-way participant reference,
+participant kind, track sid, kind, source, signalled width/height, MIME type,
+simulcast, mute and subscription state, and a track-name class.
+
+Structural metadata is signalling data and is logged without consent. Participant
+identities, display names, attributes, track names and SDK error text are never
+logged, in any consent state. A track name is reduced to whether it equals one of
+Chert's two documented constants (`facetime-remote-video`, `facetime-remote-audio`)
+or is `other`/`empty`; sid and MIME type are dropped unless server-shaped. Video is
+subscribed (`RemoteTrackPublication.set_subscribed(True)`) only while BridgeClient
+reports fresh `status=active`, `consentGiven`, `acceptingInput`, and is unsubscribed
+on pause, end, stale state, auth failure, watcher failure or shutdown. No
+`rtc.VideoStream` is created and no frame is read, encoded, stored, uploaded or
+displayed. Nothing is sent to the bridge or Gemini. Width/height come from the
+publication's signalled info only and may be absent.
+
+Checked against installed `livekit` 1.2.1 / `livekit-agents` 1.8.12 (event argument
+order, `RemoteTrackPublication`, `AutoSubscribe`). Found during that check: without
+this flag, `AgentSession.start` connects with the SDK default `SUBSCRIBE_ALL`, so the
+STT-only agent subscribes to remote video before consent (no stream is attached and
+nothing is forwarded). Left unchanged here. The candidate fix is the same audio-only
+connect, made unconditional, once a live run with this flag shows it does not affect
+Chert's audio readiness or the greeting. Live Chert compatibility of the audio-only
+connect path itself (audio-ready gate, greeting deadline, reconnects) is unverified. Mocked only: no live
+LiveKit or Chert session has run this diagnostic.

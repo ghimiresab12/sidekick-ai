@@ -9,6 +9,7 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    AutoSubscribe,
     JobContext,
     cli,
     inference,
@@ -19,6 +20,7 @@ from livekit.plugins import ai_coustics
 from sidekick_bridge import BridgeClient
 from stt_runtime import ConsentGatedSTTRuntime, speak_connection_greeting
 from transcript_forwarder import TranscriptForwarder
+from video_diagnostic import VideoTrackDiagnostic, video_diagnostic_enabled
 
 load_dotenv(".env.local")
 
@@ -74,19 +76,24 @@ async def entrypoint(ctx: JobContext) -> None:
     bridge: BridgeClient | None = None
     forwarder: TranscriptForwarder | None = None
     transcription_runtime: ConsentGatedSTTRuntime | None = None
+    video_diagnostic: VideoTrackDiagnostic | None = None
     cleanup_task: asyncio.Task[None] | None = None
 
     async def cleanup() -> None:
         try:
-            if transcription_runtime is not None:
-                await transcription_runtime.close()
+            if video_diagnostic is not None:
+                await video_diagnostic.close()
         finally:
             try:
-                if forwarder is not None:
-                    await forwarder.close()
+                if transcription_runtime is not None:
+                    await transcription_runtime.close()
             finally:
-                if bridge is not None:
-                    await bridge.close()
+                try:
+                    if forwarder is not None:
+                        await forwarder.close()
+                finally:
+                    if bridge is not None:
+                        await bridge.close()
 
     async def shutdown(_reason: str | None = None) -> None:
         nonlocal cleanup_task
@@ -100,6 +107,12 @@ async def entrypoint(ctx: JobContext) -> None:
         await bridge.start(ctx.room.name)
         forwarder = TranscriptForwarder(bridge, max_pending=16)
         forwarder.start()
+        if video_diagnostic_enabled():
+            # Opt-in, metadata only. Audio-only auto-subscription keeps the SDK from
+            # subscribing to video; the diagnostic subscribes only under consent.
+            await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+            video_diagnostic = VideoTrackDiagnostic(bridge, ctx.room)
+            video_diagnostic.start()
         transcription_runtime = ConsentGatedSTTRuntime(
             bridge,
             forwarder,

@@ -279,3 +279,22 @@ They check disabled input before startup, exact greeting, no LLM, disabled outpu
 room text and recording, and cleanup after failure. SDK compatibility itself must
 still be checked with installed Python 3.13 dependencies. Full pytest, Ruff and root
 TypeScript/regression commands remain required before the live test.
+
+### Video-track metadata diagnostic (opt-in)
+
+Reports how incoming video tracks are published, without touching frames. It logs
+`video_track_diagnostic {json}` lines (kind, source, signalled dimensions,
+publication/subscription events). Participants appear only as a per-run salted
+reference; identities, display names, track names and SDK error text are never
+logged. With the flag set the agent connects with audio-only auto-subscription; that
+path's compatibility with a live Chert call is unverified. It subscribes to
+video only while the operator's consent is active, never opens a video stream, and
+sends nothing to the bridge or Gemini. Disabled unless the flag is set:
+
+```bash
+cd agent
+env -u SIDEKICK_CONTROL_TOKEN SIDEKICK_VIDEO_DIAGNOSTIC=1 uv run python src/agent.py dev
+```
+
+Unset the flag (or set it to `0`) to disable. This is a live run with the same
+prerequisites and provider charges as the STT-only entrypoint above.
