@@ -417,6 +417,14 @@ The engine admits `observedAt` up to `maxClockSkewMs` (5 s) ahead of its clock. 
 
 ### Proposed vision interface (for Prabin's approval)
 
+Frame admission is checked before invoking vision: timestamps must parse with the shared
+strict ISO parser and fall between session start minus configured clock skew and the
+current engine clock plus that skew. The engine still validates the final observation
+after vision completes. Capture generation and timestamps are preserved, not rewritten.
+Invalid frames must cause zero vision calls. The clock-wait workaround remains unchanged.
+`maxFrameBytes` must be a safe integer from 1 through 5 MiB (5,242,880 bytes), with
+5 MiB as the default and hard ceiling; callers may configure a smaller budget.
+
 `VisionPort.describe(frame: FrameInput, signal) → Promise<ScreenDescription>`:
 - `FrameInput = { captureGeneration, observedAt, image: Uint8Array, mimeType }`, held in memory only and never stored or logged.
 - `ScreenDescription = { summary, evidenceQuality, facts? }`, where `facts` should include `leftZoneVisible` and `leftZoneUncovered` for the MVP rule.

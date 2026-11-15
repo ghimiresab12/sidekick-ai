@@ -27,6 +27,7 @@ import type {
   SessionSnapshot,
 } from '../contracts/types.js';
 import { SidekickEngine, type EngineOptions } from '../engine.js';
+import { parseIsoTime } from '../contracts/validate.js';
 import type {
   CoordinatorDiagnostic,
   CoordinatorResult,
@@ -56,7 +57,7 @@ export interface CoordinatorOptions {
   selection?: Partial<SelectionLimits>;
   /** Max consecutive reruns caused by context or evidence changes, per trigger. */
   maxReruns?: number;
-  /** Largest accepted frame, in bytes. */
+  /** Largest accepted frame, in bytes: integer 1–5 MiB; defaults to 5 MiB. */
   maxFrameBytes?: number;
   /**
    * Structured screen facts that fully describe the condition the active rule depends on
@@ -92,6 +93,7 @@ interface RunContext {
 }
 
 const MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_FRAME_BYTES = 5 * 1024 * 1024;
 const iso = (ms: number): string => new Date(ms).toISOString();
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
@@ -126,7 +128,10 @@ export class SidekickCoordinator {
     validateSelectionLimits(this.#limits);
     this.#maxReruns = options.maxReruns ?? 3;
     if (!Number.isSafeInteger(this.#maxReruns) || this.#maxReruns < 0) throw new RangeError('maxReruns must be a non-negative integer');
-    this.#maxFrameBytes = options.maxFrameBytes ?? 5 * 1024 * 1024;
+    this.#maxFrameBytes = options.maxFrameBytes === undefined ? MAX_FRAME_BYTES : options.maxFrameBytes;
+    if (!Number.isSafeInteger(this.#maxFrameBytes) || this.#maxFrameBytes < 1 || this.#maxFrameBytes > MAX_FRAME_BYTES) {
+      throw new RangeError(`maxFrameBytes must be an integer from 1 to ${MAX_FRAME_BYTES}`);
+    }
     const keys = options.conditionFactKeys ?? [];
     if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string' && k.length > 0 && k.length <= 64)) {
       throw new TypeError('conditionFactKeys must be an array of fact names');
@@ -302,6 +307,17 @@ export class SidekickCoordinator {
     }
     if (generation < snap.value.captureGeneration) {
       return { ok: false, error: 'stale_evidence', detail: 'frame captured before the last pause/resume; not sent to vision' };
+    }
+    // Reject inadmissible capture times before any external image processing. Mirror
+    // engine admission, including its configured producer-clock tolerance. The engine
+    // checks again after vision, so this does not bypass its lifecycle validation.
+    const observedMs = parseIsoTime(observedAt);
+    if (observedMs === undefined) return { ok: false, error: 'invalid_timestamp' };
+    const nowMs = this.#now().getTime();
+    const startedMs = parseIsoTime(snap.value.startedAt);
+    const skew = this.engine.config.maxClockSkewMs;
+    if (!Number.isFinite(nowMs) || startedMs === undefined || observedMs > nowMs + skew || observedMs < startedMs - skew) {
+      return { ok: false, error: 'timestamp_out_of_range' };
     }
     if (!this.#vision) return { ok: false, error: 'vision_unavailable' };
 
