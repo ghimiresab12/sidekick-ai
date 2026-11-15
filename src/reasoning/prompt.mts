@@ -13,7 +13,7 @@ Only recommend when the latest screen clearly shows the left defensive zone and 
 conditionObservationIds must reference recent screen observations in the current captureGeneration.
 contextObservationIds are background, e.g. a role assignment. They NEVER refresh condition evidence. The two lists must not overlap.
 Use observedAt, not receivedAt, to decide recency. Withhold when evidence is old, conflicting, incomplete, or unknown.
-Every evidence ID must exist in this input. Use exact excerpts in evidenceQuotes for all cited observations.
+Every evidence ID must exist in this input. Use exact excerpts in evidenceQuotes for ALL cited observations, including EACH contextObservationId as well as EACH conditionObservationId. If condition IDs contain screen-1 and context IDs contain conversation-1, evidenceQuotes MUST contain a quote for screen-1 AND a quote for conversation-1. Check this coverage before returning JSON.
 Use current accepted participant/goal IDs; a same-batch proposed role is not accepted state.
 Use fingerprint left_defense_uncovered. Keep title <=80 characters, shortAdvice <=200. Use tentative wording such as "appears".
 Do not invent event IDs, recommendation IDs, lifecycle states, timestamps, revisions or API actions.
@@ -40,33 +40,35 @@ export function promptData(input: ReasoningInput) {
 }
 
 const string = { type: 'string' };
-const strings = { type: 'array', items: string, maxItems: 50 };
-const quoteList = { type: 'array', maxItems: 50, items: { type: 'object', additionalProperties: false,
+const strings = { type: 'array', items: string };
+const quoteList = { type: 'array', items: { type: 'object',
   properties: { observationId: string, quote: string }, required: ['observationId', 'quote'] } };
 const base = { sourceObservationIds: strings, evidenceQuotes: quoteList };
-const variant = (type: string, fields: Record<string, unknown>) => ({ type: 'object', additionalProperties: false,
+const variant = (type: string, fields: Record<string, unknown>) => ({ type: 'object',
   properties: { type: { type: 'string', enum: [type] }, ...base, ...fields }, required: ['type', ...Object.keys(base), ...Object.keys(fields)] });
 
+// Keep the provider schema lightweight: this model rejected the full constrained schema.
+// Array bounds and unknown-field rejection remain enforced by validateModelOutput locally.
 export const RESPONSE_SCHEMA = {
-  type: 'object', additionalProperties: false,
+  type: 'object',
   properties: {
-    contextUpdates: { type: 'array', maxItems: 20, items: { anyOf: [
+    contextUpdates: { type: 'array', items: { anyOf: [
       variant('role_assignment', { participantId: string, role: string }),
       variant('group_goal', { text: string }),
       variant('activity_identification', { activity: { type: 'string', enum: ['gaming'] } }),
       variant('participant_decision', { text: string, participantIds: strings })
     ] } },
-    recommendationCandidates: { type: 'array', maxItems: 5, items: { type: 'object', additionalProperties: false,
+    recommendationCandidates: { type: 'array', items: { type: 'object',
       properties: {
         fingerprint: { type: 'string', enum: ['left_defense_uncovered'] }, title: string, shortAdvice: string,
         urgency: { type: 'string', enum: ['normal', 'important'] }, conditionObservationIds: strings,
         contextObservationIds: strings, relatedParticipantIds: strings, relatedGoalId: string, evidenceQuotes: quoteList,
-        situation: { type: 'object', additionalProperties: false, properties: {
+        situation: { type: 'object', properties: {
           leftZoneVisible: { type: 'boolean' }, leftZoneUncovered: { type: 'boolean' },
           certainty: { type: 'string', enum: ['clear', 'uncertain'] }
         }, required: ['leftZoneVisible', 'leftZoneUncovered', 'certainty'] }
       }, required: ['fingerprint', 'title', 'shortAdvice', 'urgency', 'conditionObservationIds', 'contextObservationIds', 'evidenceQuotes', 'situation']
     } },
-    uncertainties: { type: 'array', maxItems: 10, items: string }
+    uncertainties: { type: 'array', items: string }
   }, required: ['contextUpdates', 'recommendationCandidates', 'uncertainties']
 };

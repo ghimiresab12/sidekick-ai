@@ -48,3 +48,12 @@ No session-engine, shared-contract, Chert-adapter or frontend source was modifie
 
 Use the commands in reasoning.md to reproduce checks. This is a scoped verification record,
 not a claim that every possible input or the complete Sidekick application has been tested.
+
+## Follow-up: real Gemini smoke test
+
+On codex/gemini-schema-compatibility, gemini-3.5-flash-lite successfully completed the full synthetic
+reasoning demo after simplifying the provider response schema. Result: ok=true, one accepted
+recommendation candidate, both condition/context evidence lists populated, no withheld candidates.
+82 offline tests and strict TypeScript checks pass. The original 80-test results and no-credentials
+statements above describe the earlier implementation verification. Chert and raw media remain untested.
+Credentials stayed in ignored .env and were not printed, staged or committed.
