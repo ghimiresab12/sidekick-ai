@@ -86,8 +86,14 @@ export interface VisionPort {
 
 // ── Coordinator results and diagnostics ─────────────────────────────────────
 
+/** Reasoning's participant limit (src/reasoning/validation.mts: participants ≤ 20). */
+export const MAX_PARTICIPANTS = 20;
+
 export type CoordinatorError =
   | EngineError
+  | 'participant_limit_reached'
+  | 'duplicate_participant'
+  | 'invalid_participant_name'
   | 'vision_unavailable'
   | 'vision_failed'
   | 'vision_busy'
