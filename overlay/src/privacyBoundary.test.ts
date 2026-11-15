@@ -47,3 +47,43 @@ describe('privacy boundary (static)', () => {
     expect(users).toEqual(['./voice/speechService.ts']);
   });
 });
+
+/**
+ * The in-process backend bundles shared backend modules from `src/` into the page.
+ * Every backend module the overlay may import is scanned with the same rules, and the
+ * overlay may never import the Gemini adapter (API keys stay server-side).
+ */
+const backendSources = import.meta.glob(
+  [
+    '../../src/engine.ts',
+    '../../src/contracts/*.ts',
+    '../../src/sessions/*.ts',
+    '../../src/recommendations/*.ts',
+    '../../src/coordinator/*.ts',
+    '../../src/reasoning/*.mts',
+    '../../src/adapters/model/mock.mts',
+  ],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+describe('privacy boundary (shared backend modules bundled into the overlay)', () => {
+  it('found the backend modules', () => {
+    expect(Object.keys(backendSources).length).toBeGreaterThan(8);
+  });
+
+  for (const [label, pattern] of FORBIDDEN) {
+    it(`no ${label} in bundled backend code`, () => {
+      const offenders = Object.entries(backendSources)
+        .filter(([, code]) => pattern.test(code))
+        .map(([file]) => file);
+      expect(offenders).toEqual([]);
+    });
+  }
+
+  it('the overlay never imports the Gemini adapter or reads API keys', () => {
+    const offenders = Object.entries({ ...sources, ...backendSources })
+      .filter(([, code]) => /adapters\/model\/gemini|GEMINI_API_KEY|process\.env/.test(code))
+      .map(([file]) => file);
+    expect(offenders).toEqual([]);
+  });
+});

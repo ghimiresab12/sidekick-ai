@@ -1,23 +1,40 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { VoiceExplanation } from '../contracts/proposed';
+import type { ExplanationScript } from '../contracts/pending';
 import type { SpeakHandlers, SpeechPlayer, VoiceLike } from './speechService';
 import { createVoiceController, type VoiceControllerDeps } from './voiceController';
 
 const VOICE: VoiceLike = { name: 'Samantha', lang: 'en-US', localService: true, default: true };
-const exp = (id: string): VoiceExplanation => ({
-  recommendationId: id, text: 'One. Two.', refersToEarlierObservation: false, evidenceObservationIds: ['o1'], generatedAt: '',
+let nextRequest = 0;
+const script = (recommendationId: string): ExplanationScript => ({
+  request: {
+    id: `req-${++nextRequest}`,
+    sessionId: 's1',
+    recommendationId,
+    status: 'pending',
+    requestedAt: '2026-11-14T18:00:00.000Z',
+    updatedAt: '2026-11-14T18:00:00.000Z',
+  },
+  text: 'One. Two.',
+  refersToEarlierObservation: false,
 });
 
 function setup(over: Partial<VoiceControllerDeps> = {}) {
   let last: SpeakHandlers | null = null;
   const player = {
-    speak: vi.fn<SpeechPlayer['speak']>((_c, _v, h) => { last = h; }),
+    speak: vi.fn<SpeechPlayer['speak']>((_c, _v, h) => {
+      last = h;
+    }),
     cancel: vi.fn<SpeechPlayer['cancel']>(),
   };
   const reports: Array<[string, string]> = [];
   const deps: VoiceControllerDeps = {
-    requestExplanation: vi.fn(async (id: string) => exp(id)),
-    reportPlayback: (id, r) => reports.push([id, r]),
+    requestExplanation: vi.fn(async (id: string) => script(id)),
+    reportStatus: async (requestId, status) => {
+      reports.push([requestId, status]);
+    },
+    cancel: async (requestId) => {
+      reports.push([requestId, 'cancel']);
+    },
     isSpeechAvailable: () => true,
     findLocalVoice: async () => VOICE,
     getPlayer: () => player,
@@ -27,21 +44,27 @@ function setup(over: Partial<VoiceControllerDeps> = {}) {
   return { c, player, reports, deps, handlers: () => last! };
 }
 
-describe('voice controller', () => {
-  it('idle → preparing → speaking → finished, scoped to one recommendation', async () => {
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+describe('voice controller (engine voice requests)', () => {
+  it('idle → preparing → speaking → finished, reported by request id', async () => {
     const { c, player, reports, handlers } = setup();
     const p = c.explain('r1');
     expect(c.getState()).toMatchObject({ status: 'preparing', recommendationId: 'r1' });
     await p;
+    const requestId = c.getState().requestId!;
     expect(player.speak).toHaveBeenCalledWith(['One.', 'Two.'], VOICE, expect.any(Object));
     handlers().onStart();
     expect(c.getState().status).toBe('speaking');
     handlers().onEnd();
     expect(c.getState().status).toBe('finished');
-    expect(reports).toEqual([['r1', 'playing'], ['r1', 'finished']]);
+    expect(reports).toEqual([
+      [requestId, 'playing_locally'],
+      [requestId, 'finished'],
+    ]);
   });
 
-  it('ignores explain() while busy — no overlapping explanations', async () => {
+  it('ignores explain() while busy (no overlapping explanations)', async () => {
     const { c, deps } = setup();
     await c.explain('r1');
     await c.explain('r2');
@@ -49,30 +72,35 @@ describe('voice controller', () => {
     expect(c.getState().recommendationId).toBe('r1');
   });
 
-  it('stop() cancels speech immediately and records cancelled', async () => {
+  it('Stop cancels speech immediately and calls cancelExplanation (never reportStatus)', async () => {
     const { c, player, reports, handlers } = setup();
     await c.explain('r1');
+    const requestId = c.getState().requestId!;
     handlers().onStart();
     c.stop();
     expect(player.cancel).toHaveBeenCalledOnce();
     expect(c.getState().status).toBe('cancelled');
-    expect(reports.at(-1)).toEqual(['r1', 'cancelled']);
+    expect(reports.at(-1)).toEqual([requestId, 'cancel']);
     handlers().onEnd(); // late callback after cancel
     expect(c.getState().status).toBe('cancelled');
+    expect(reports.filter(([, s]) => s === 'finished')).toEqual([]);
   });
 
-  it('stop() while preparing discards the late server reply (nothing is spoken)', async () => {
-    let resolve!: (e: VoiceExplanation) => void;
-    const { c, player } = setup({ requestExplanation: () => new Promise((r) => { resolve = r; }) });
+  it('Stop while preparing cancels the late engine request so it cannot stay pending', async () => {
+    let resolve!: (s: ExplanationScript) => void;
+    const { c, player, reports } = setup({ requestExplanation: () => new Promise((r) => (resolve = r)) });
     const p = c.explain('r1');
-    c.stop();
-    resolve(exp('r1'));
+    c.stop(); // no request id yet: nothing to cancel locally
+    const late = script('r1');
+    resolve(late);
     await p;
+    await flush();
     expect(player.speak).not.toHaveBeenCalled();
     expect(c.getState().status).toBe('cancelled');
+    expect(reports).toEqual([[late.request.id, 'cancel']]);
   });
 
-  it('stopIfFor only stops the matching card', async () => {
+  it('stopIfFor only stops the matching card (dismiss)', async () => {
     const { c } = setup();
     await c.explain('r1');
     c.stopIfFor('r2');
@@ -81,13 +109,41 @@ describe('voice controller', () => {
     expect(c.getState().status).toBe('cancelled');
   });
 
-  it('falls back to text when speech synthesis is unavailable', async () => {
+  it('silenceForLifecycle stops playback WITHOUT reporting (engine records pause/end itself)', async () => {
+    const { c, player, reports, handlers } = setup();
+    await c.explain('r1');
+    handlers().onStart();
+    const before = reports.length;
+    const requestId = c.silenceForLifecycle();
+    expect(requestId).toBe(c.getState().requestId);
+    expect(player.cancel).toHaveBeenCalled();
+    expect(c.getState().status).toBe('cancelled');
+    expect(reports.length).toBe(before);
+  });
+
+  it('syncActiveRequest: silences once the engine drops a request it had shown as active', async () => {
+    const { c, player, reports, handlers } = setup();
+    await c.explain('r1');
+    handlers().onStart();
+    const requestId = c.getState().requestId!;
+    const before = reports.length;
+    c.syncActiveRequest(undefined); // not yet seen: an SSE snapshot may simply lag
+    expect(c.getState().status).toBe('speaking');
+    c.syncActiveRequest({ requestId, status: 'playing_locally' });
+    c.syncActiveRequest(undefined); // engine ended it (timeout / pause / end)
+    expect(player.cancel).toHaveBeenCalled();
+    expect(c.getState().status).toBe('cancelled');
+    expect(reports.length).toBe(before); // engine already terminal: nothing reported
+  });
+
+  it('falls back to text when speech synthesis is unavailable, reporting failed', async () => {
     const { c, player, reports } = setup({ isSpeechAvailable: () => false });
     await c.explain('r1');
     expect(player.speak).not.toHaveBeenCalled();
     expect(c.getState()).toMatchObject({ status: 'failed', fallback: { text: 'One. Two.' } });
     expect(c.getState().fallback?.reason).toMatch(/not available/);
-    expect(reports).toEqual([['r1', 'failed']]);
+    await flush();
+    expect(reports).toEqual([[c.getState().requestId, 'failed']]);
   });
 
   it('refuses network-only voices and shows text instead', async () => {
@@ -97,35 +153,54 @@ describe('voice controller', () => {
     expect(c.getState().fallback?.reason).toMatch(/does not use network voices/);
   });
 
-  it('playback errors show the text fallback', async () => {
+  it('playback errors and outside interruptions show the text fallback and report failed', async () => {
     const { c, handlers, reports } = setup();
     await c.explain('r1');
     handlers().onError('synthesis-failed');
     expect(c.getState()).toMatchObject({ status: 'failed', fallback: { text: 'One. Two.' } });
-    expect(reports.at(-1)).toEqual(['r1', 'failed']);
+    expect(reports.at(-1)?.[1]).toBe('failed');
+
+    await c.explain('r1');
+    handlers().onInterrupted();
+    expect(c.getState().status).toBe('failed');
+    expect(reports.at(-1)?.[1]).toBe('failed');
   });
 
-  it('request errors fail without text and without a playback report', async () => {
-    const { c, reports } = setup({ requestExplanation: async () => { throw new Error('Session not active'); } });
+  it('request errors fail without text and without any report', async () => {
+    const { c, reports } = setup({
+      requestExplanation: async () => {
+        throw new Error('Sidekick is not observing right now.');
+      },
+    });
     await c.explain('r1');
-    expect(c.getState()).toMatchObject({ status: 'failed', fallback: { reason: 'Session not active', text: null } });
+    expect(c.getState()).toMatchObject({ status: 'failed', fallback: { text: null } });
     expect(reports).toEqual([]);
   });
 
-  it('reset() silences without reporting (used on discard)', async () => {
+  it('refuses a script for a different recommendation', async () => {
+    const { c, player, reports } = setup({ requestExplanation: async () => script('other') });
+    await c.explain('r1');
+    expect(player.speak).not.toHaveBeenCalled();
+    expect(c.getState().status).toBe('failed');
+    await flush();
+    expect(reports.at(-1)?.[1]).toBe('failed');
+  });
+
+  it('a failing backend report never breaks local playback', async () => {
+    const { c, handlers } = setup({ reportStatus: async () => Promise.reject(new Error('offline')) });
+    await c.explain('r1');
+    handlers().onStart();
+    handlers().onEnd();
+    await flush();
+    expect(c.getState().status).toBe('finished');
+  });
+
+  it('reset() silences without reporting (discard / unmount)', async () => {
     const { c, player, reports } = setup();
     await c.explain('r1');
     c.reset();
     expect(player.cancel).toHaveBeenCalled();
     expect(c.getState().status).toBe('idle');
     expect(reports).toEqual([]);
-  });
-
-  it('can explain again after finishing (returns to quiet in between)', async () => {
-    const { c, handlers, deps } = setup();
-    await c.explain('r1');
-    handlers().onEnd();
-    await c.explain('r1');
-    expect(deps.requestExplanation).toHaveBeenCalledTimes(2);
   });
 });

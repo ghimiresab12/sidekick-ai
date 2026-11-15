@@ -1,128 +1,169 @@
 # Sidekick overlay: companion UI, private voice, session review
 
-> **Status: MOCK PROTOTYPE.** Runs on fictional scripted data. **Not connected to Chert, FaceTime, the backend or a model.**
-> It is a **companion browser panel (fallback)**, **not** a native FaceTime overlay.
-> Provisional: built before the Chert starter was inspected (see `docs/techstack.md` §8).
+> **Status: connected to the real backend code, with synthetic input.** The overlay consumes the shared
+> contracts (`src/contracts/types.ts`) and, by default, runs the **real** session engine,
+> `SidekickCoordinator` and reasoning module inside the page, fed by a two-step synthetic demo feed.
+> Reasoning uses the **deterministic mock provider, not Gemini**. No Chert, FaceTime, microphone, camera or
+> screen share is involved. It is a **companion browser panel**, not a native FaceTime overlay.
 
-Owner: UI / voice / review workstream (D). Branch: `feature/overlay-ui`.
+Owner: UI / voice / review workstream (D). Branch: `feature/overlay-backend-integration`.
 
 ## Run it
 
-Requires Node 18+ (tested on Node 24).
+Requires Node 24 (root `.nvmrc`). The overlay imports the shared backend modules from `../src`, so both
+package sets must be installed:
 
 ```bash
-cd overlay
-npm install
-npm run dev        # http://localhost:5173
-npm test           # unit tests (Vitest)
-npm run typecheck  # TypeScript, no emit
-npm run build      # typecheck + production build into overlay/dist (git-ignored)
+npm ci                    # repository root (types for the shared modules)
+cd overlay && npm ci
+npm run dev               # http://localhost:5173
+npm test                  # Vitest, including end-to-end tests through the real coordinator
+npm run typecheck         # fails if src/contracts/types.ts drifts from what the overlay uses
+npm run build             # typecheck + production build into overlay/dist (git-ignored)
 ```
 
 ### Demo script (about 2 minutes)
 
-1. Tick the consent box, then **Start observing**. The empty state shows ("observing quietly").
-2. About 2.5 s later, roles are recorded from the scripted conversation. About 5 s after that, the **Left defense** card appears **silently**.
-3. **Explain with voice** speaks privately on this device. Try **Stop voice**.
-4. **Pause** stops speech, marks the card "Earlier · not currently verified" and disables Explain. Then **Resume**.
-5. Open **Demo controls**, then **Play next scripted observation now**: the **Right wing** card arrives. **History, then Show** brings a card back to the front.
-6. **End session**, confirm, **Generate review**. Key moments link to recorded events.
-7. **Discard session**, confirm. Everything is cleared and the session can't be resumed.
+1. Tick the consent box, then **Start observing**.
+2. Open **Demo controls** and **Send next synthetic observation**: "Alex is responsible for left defense."
+   Reasoning records the role. No card yet: advice needs screen evidence.
+3. Send the second observation (a structured frame: left zone uncovered). The coordinator runs reasoning,
+   the engine validates the candidate, and **Left defense appears exposed** appears **silently**, with
+   Alex's role and the evidence provenance.
+4. **Explain with voice** speaks a grounded explanation on this device only. Try **Stop voice**.
+5. **Pause**: speech stops, the engine marks the card stale and moves it to History. The main slot says
+   "Paused" instead of showing earlier advice as current. **History → Show** brings it back, labelled earlier.
+6. **Resume**: the card stays earlier until new evidence arrives (engine rule).
+7. **End session**, confirm, **Generate review**. The timeline is the engine's own event log.
+8. **Discard session**, confirm. The engine deletes the session.
 
-Demo controls (mock only): skip timers, or tick **Simulate speech synthesis unavailable** to show the text fallback.
+Tick **Simulate speech synthesis unavailable** to see the text fallback.
 
-## What is implemented, mocked or planned
+## What is real, synthetic or missing
 
 | Capability | Status |
 |---|---|
-| Consent screen, active/paused/ended/discarded lifecycle, illegal transitions blocked | Implemented, unit + browser tested |
-| One prominent card (active over stale, important over normal, newest first), history, dismiss, empty states | Implemented, tested |
-| Evidence (source, observed time, quality in words) and player context | Implemented, tested |
-| Explain with voice, Stop voice, preparing/speaking/finished/cancelled/failed, text fallback | Implemented. Logic tested with a fake engine; real Chrome path reaches a defined state |
-| Speech stops on dismiss (that card), pause, end, discard, unmount, tab close | Implemented, tested |
-| End-of-session review grounded in recorded events | Implemented (**mock rule-based generator**, not AI) |
-| Recommendations, observations, events | **Mocked** (`src/data/mock-session.json`) |
-| Real data source (Chert / backend) | **Planned**: implement `SidekickDataSource` |
-| Native over-game overlay | **Not attempted** (CH-5) |
-| Private playback verified isolated from the FaceTime call | **Not yet tested live** (CH-4; see below) |
+| Session lifecycle (start, pause, resume, end, discard) | **Real engine + coordinator** rules; UI disables what the engine would reject |
+| Recommendations, staleness, dedupe, evidence, player context | **Real engine** `OverlayState`, versioned |
+| Reasoning | **Real `reason()`** with the deterministic **mock provider**. Gemini is server-only |
+| Late reasoning after pause/end | **Real coordinator** discards it (tested) |
+| Voice requests (pending, playing, finished, failed, cancelled) | **Real engine** voice lifecycle, by request id |
+| Explanation text | Backend-side template from `ExplanationContext` (`backend/explanationText.ts`), not a model |
+| Local speech | Browser `speechSynthesis`, on-device voices only |
+| Session review | Rule-based summary of the **real engine timeline**. No backend review service exists yet |
+| Input | **Synthetic**: two scripted observations (`backend/inProcessBackend.ts`) |
+| HTTP/SSE bridge to a separate backend process | **Not on main.** Adapter not written yet (see "Bridge requirements") |
+| Chert / FaceTime input | **Not connected** |
+| Private playback verified isolated from the call | **Not yet tested live** (CH-4) |
 
 ## Architecture
 
 ```text
-mock-session.json ─▶ mockDataSource (fake backend: lifecycle rules, scripted feed, event log)
-                          │  implements SidekickDataSource  ◀── the ONLY seam to swap for real integration
-                          ▼
-          useSidekickSession (useReducer)        useVoiceExplanation (useSyncExternalStore)
-                  │  session snapshot                   │  voiceController ─▶ speechService ─▶ speechSynthesis
-                  └──────────────┬──────────────────────┘
-                              App.tsx  (cross-cutting rules: stop voice on dismiss/pause/end/discard; confirmations)
-                                 ▼
+synthetic feed ─▶ SidekickCoordinator ─▶ reason() + mock provider
+                       │  (abort on pause/end, revalidate, select observations)
+                       ▼
+                 SidekickEngine  ── subscribe ─▶ OverlayState (versioned)
+                       ▲                               │
+   inProcessBackend implements SidekickBackend  ◀──────┘   ◀── the ONLY seam the UI uses
+                       │
+   useSidekickSession (reducer: version dedupe, connection, pending)   useVoiceExplanation
+                       └──────────────────────┬──────────────────────────────┘
+                                        App.tsx (voice stop rules, confirmations)
+                                              ▼
    ConsentScreen · LiveScreen(StatusBar, RecommendationCard[PlayerContext, EvidenceList, VoiceControls], History)
-   EndSessionPanel · SessionReview · DiscardedScreen · ConfirmDialog · MockBanner/MockControls
+   EndSessionPanel · SessionReview · StateScreens (connecting, unavailable, reconnecting, discarded)
 ```
 
 ```text
 src/
-  contracts/sidekick.ts      verbatim copy of docs/engineering.md §3 + §8 (do not edit here)
-  contracts/proposed.ts      ⚠️ additions PENDING Sabik's approval
-  data/                      SidekickDataSource (interface), mock source, seed + validator, mock review generator
-  session/                   sessionMachine (transition table), reducer, selectors, useSidekickSession
-  voice/                     speechService (only file using speechSynthesis), voiceController, hook
-  components/                presentational components (props in, callbacks out; no data-source imports)
-  ui/format.ts               labels and time formatting
-  *.test.ts                  Vitest suites, including privacyBoundary.test.ts
+  contracts/shared.ts      type-only re-export of src/contracts/types.ts (no duplicates)
+  contracts/pending.ts     types with NO shared equivalent yet (GAP 1, GAP 2)
+  backend/                 SidekickBackend port, inProcessBackend, explanationText, browserCrypto shim
+  session/                 lifecycle table, reducer (version dedupe, connection), selectors, hook
+  voice/                   speechService (only speechSynthesis user), voiceController (request ids), hook
+  review/buildReview.ts    review from SessionEvent[] + final OverlayState
+  components/              presentational components (props in, callbacks out)
 ```
+
+`src/engine.ts` imports `randomUUID` from `node:crypto`; `vite.config.ts` and `tsconfig.json` map that one
+import to `backend/browserCrypto.ts` (Web Crypto). No backend file is modified.
+
+## Contract mapping (provisional → shared)
+
+| Overlay before | Now |
+|---|---|
+| `contracts/sidekick.ts` (copy of old engineering.md §3) | **Deleted.** `contracts/shared.ts` re-exports `src/contracts/types.ts` |
+| `Session` + `RecommendationWithContext[]` + `Observation[]` snapshot | `OverlayState` (`prominent`, `history`, `voiceBusy`, `activeVoiceRequest`, `version`) |
+| UI ranking of cards | Engine's `prominent` (active only) and `history` order. The UI only adds "Show" for open cards |
+| Evidence with observation summary and quality | `RecommendationView.evidence`: source, kind (condition/context), time. No text, by design |
+| `relatedParticipantIds` resolved via `Session.participants` | `RecommendationView.relatedParticipants` (roles at creation) + `contextChangedSinceCreation` |
+| `TimelineEvent` + proposed event types | `SessionEvent` (typed payloads). `voice_finished.outcome` gives finished / stopped / failed |
+| `requestVoiceExplanation(recId)` → text | `requestExplanation` → `ExplanationScript { request: VoiceRequest, text, … }` |
+| `reportVoicePlayback(recId, …)` | `reportVoiceStatus(requestId, …)` and `cancelExplanation(requestId)` |
+| `canExplain` computed in UI | `RecommendationView.canExplain` from the engine |
+| Hand-written mock backend + seed + validator | **Deleted.** Replaced by the real engine + coordinator in-process |
+
+## Contract gaps (need the contracts owner's decision)
+
+None of these change an existing shared type. Each is additive.
+
+1. **Explanation text.** engineering.md §3.2 says the backend generates text from `ExplanationContext`, but
+   `types.ts` has no type for the result. The overlay uses `ExplanationScript { request: VoiceRequest; text;
+   refersToEarlierObservation }` in `contracts/pending.ts`. Proposal: add it to `types.ts`. The overlay must
+   not receive `ExplanationContext` itself, because it contains raw transcript text.
+2. **Session review.** `SessionReview` exists only as a proposal in engineering.md §8, and no review service
+   exists. The overlay builds it client-side from the engine timeline (`review/buildReview.ts`). Proposal:
+   add the §8 type to `types.ts`, then decide whether a backend `generateReview` replaces the client builder.
+3. **Participants for consent.** `OverlayState` has no participant list, so the consent screen no longer
+   names participants. Not needed for the MVP; noted in case design.md wants names there.
+4. **Activity confirmation.** The overlay has no "confirm activity" control yet. The in-process setup
+   confirms `gaming`, and `OverlayState.suggestedActivity` is shown when present.
+
+## Bridge requirements (for the local HTTP/SSE bridge, not on main)
+
+The overlay needs one more `SidekickBackend` implementation over HTTP. To keep a single contract, the bridge
+should send **shared types unchanged**, not a translated legacy view, and call the coordinator for lifecycle
+and input:
+
+| Port operation | Proposed bridge route | Backend call |
+|---|---|---|
+| `connect` | `GET /api/session/stream` (SSE, `data:` = `OverlayState`) | `engine.subscribe` |
+| `startSession` … `discardSession` | `POST /api/session/{start,pause,resume,end,discard}` | `coordinator.*` |
+| `dismiss` | `POST /api/session/dismiss {recommendationId}` | `engine.dismiss` |
+| `requestExplanation` | `POST /api/session/voice {recommendationId}` → `ExplanationScript` | `engine.requestExplanation` + text |
+| `reportVoiceStatus` | `POST /api/session/voice-status {requestId, status}` | `engine.reportVoiceStatus` |
+| `cancelExplanation` | `POST /api/session/voice-cancel {requestId}` | `engine.cancelExplanation(…, 'user')` |
+| `getTimeline` | `GET /api/session/timeline` → `{ events, truncated }` | `engine.getTimeline` |
+
+Errors as `{ error: EngineError }`. The UI already handles `reconnecting` / `unavailable`, drops snapshots
+whose `version` does not increase, disables actions while disconnected and never shows the last state as live.
+The bridge should require `Content-Type: application/json` and check `Origin`, so other websites cannot
+drive it.
 
 ## Privacy boundary for voice
 
-**What the code guarantees** (enforced by `src/privacyBoundary.test.ts`):
+**What the code guarantees** (enforced by `src/privacyBoundary.test.ts`, which now also scans every bundled
+backend module):
 
-- Sound comes only from `window.speechSynthesis` in `voice/speechService.ts`, which plays through the OS default output and produces no media stream.
-- No WebRTC peer connections, `getUserMedia`/`getDisplayMedia`, `MediaStream`, Web Audio graphs, LiveKit/Chert imports, or network calls anywhere in the overlay.
-- **Only on-device voices** (`localService === true`). Network voices (which send text to a remote server) are refused, and the UI shows a labeled text fallback.
-- Sound starts only from an **Explain with voice** press, scoped to one recommendation ID. Never on card creation. One explanation at a time.
+- Sound comes only from `window.speechSynthesis` in `voice/speechService.ts`. No media stream is created.
+- No WebRTC, `getUserMedia`/`getDisplayMedia`, `MediaStream`, Web Audio, LiveKit/Chert imports or network
+  calls, in the overlay or in the backend modules it bundles. The Gemini adapter and `process.env` are never
+  imported.
+- Only on-device voices (`localService === true`); otherwise a labelled text fallback.
+- Sound starts only from **Explain with voice**, scoped to one recommendation and one engine voice request.
+- Speech stops on Stop, dismiss of that card, pause, end, discard, connection loss, unmount, tab close, and
+  whenever the engine drops `activeVoiceRequest`.
 
-**What code cannot guarantee. Must be tested live (CH-4):**
+**Must be tested live (CH-4):**
 
-- [ ] **Acoustic pickup:** on speakers, the FaceTime microphone may hear the explanation. Test with headphones and without; confirm other participants hear nothing.
-- [ ] **Screen-share audio:** if this panel runs on the Mac that is screen-sharing in FaceTime, and the share includes app/system audio, TTS might be shared. Test on the target setup.
-- [ ] **User-gesture rules:** headless Chrome rejected speech with `not-allowed` for script-generated clicks (the app correctly showed the text fallback). Confirm real clicks speak on the target browser (Chrome, Safari).
-- [ ] **On-device voices exist** on the target machine (macOS system voices normally report `localService: true`).
-- [ ] **Stop** cancels immediately on the target browser.
+- [ ] Acoustic pickup: with speakers, the FaceTime microphone may hear the explanation. Test with and without headphones.
+- [ ] Screen-share audio: if this panel runs on the Mac sharing its screen with app audio, TTS could be shared.
+- [ ] User-gesture rules: confirm real clicks speak on Chrome and Safari (headless script clicks get `not-allowed`).
+- [ ] On-device voices exist on the target machine.
+- [ ] Stop cancels immediately on the target browser.
 
-## Contract alignment with the session engine (pending migration)
+## Open questions
 
-Since this prototype was built, `origin/main` added the approved contracts in **`src/contracts/types.ts`** and the `SidekickEngine`. `overlay/src/contracts/sidekick.ts` is a **superseded** copy of the original `engineering.md` §3, kept only until migration. Differences that affect the UI:
-
-| Overlay prototype today | Approved engine contract |
-|---|---|
-| Own `SessionSnapshot` aggregate | `OverlayState` (versioned) via `subscribe(sessionId, listener)`; ignore non-increasing `version` |
-| Evidence shows observation summaries | `RecommendationView.evidence` has source, kind (condition/context) and time only. **No summaries or transcript text** reach the overlay |
-| Stale card stays prominent while paused | `prominent` is an **active** card only; stale cards go to `history` |
-| `requestVoiceExplanation` → text | `requestExplanation` → `{ request, context }`; text generation from `ExplanationContext` is a backend step (owner TBD) |
-| `reportVoicePlayback(recId, …)` | `reportVoiceStatus(requestId, …)` / `cancelExplanation(requestId, 'user')`; stop playback when `activeVoiceRequest` changes or disappears |
-| Mock review over own events | Review from `getTimeline()` (typed payloads) + `getObservation`; respect `timelineTruncated` |
-
-### Original contract proposals (most now covered by the engine)
-
-The overlay originally needed these **additive** changes, isolated in `src/contracts/proposed.ts`. P1, P2, P4 and P5 are covered by the engine contracts. **P3 (explanation text) remains open.**
-
-| # | Proposal | Why the UI needs it |
-|---|---|---|
-| P1 | Event types `session_paused`, `session_resumed`, `recommendation_stale`, `voice_cancelled`, `voice_failed` | The review must honestly show pauses, stopped/failed voice and cards that went stale |
-| P2 | `Recommendation.relatedParticipantIds?: string[]` | Show player context ("Alex · Left defense") via `Session.participants` |
-| P3 | `VoiceExplanation { recommendationId, text, refersToEarlierObservation, evidenceObservationIds, generatedAt }` | §9 names `requestVoiceExplanation` but defines no payload |
-| P4 | `reportVoicePlayback(id, 'playing' \| 'finished' \| 'cancelled' \| 'failed')` | The browser owns playback; the backend owns the event log. `voiceDeliveryStatus` has no `cancelled` value |
-| P5 | Operations `startSession`, `pauseSession`, `resumeSession`, `dismissRecommendation`, `subscribe` (push) | Required by design.md (consent, pause/resume, dismiss, proactive cards) but missing from §9 |
-
-**Open questions:**
-
-1. Who generates `SessionReview`: a model, rules, or both? (The overlay renders any valid `SessionReview`.)
-2. Can a dismissed card later be marked `resolved` if an observation supports it? (The mock says no.)
-3. Can a session be discarded from `starting` (consent declined), or only after `ended`? (The mock allows only after `ended`.)
-4. Should Explain work while `paused`? (The mock and UI say no: pausing stops processing.)
-5. Is consent per participant or per session? (The UI asks the requester to confirm everyone agrees.)
-
-## Integrating later
-
-Implement `SidekickDataSource` over the real transport, then replace `createMockDataSource(...)` in `src/App.tsx`. The `MockBanner` and `MockControls` render only when `mode === 'mock'`. No component imports the data source directly.
+1. Who generates `SessionReview` long term: rules (today), a model, or both?
+2. Should the overlay get a "confirm activity" control, using `OverlayState.suggestedActivity`?
+3. Is consent per participant or per session? (The UI asks the requester to confirm.)

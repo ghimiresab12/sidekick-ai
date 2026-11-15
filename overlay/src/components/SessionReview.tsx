@@ -1,14 +1,16 @@
-import type { SessionReview as Review } from '../contracts/sidekick';
-import type { SessionSnapshot } from '../data/SidekickDataSource';
-import { selectEvidence, selectRelatedPlayers } from '../session/selectors';
-import { capitalize, EVENT_LABEL, formatClock, REC_STATUS_LABEL } from '../ui/format';
+import type { SessionReview as Review, SessionTimeline } from '../contracts/pending';
+import type { OverlayState } from '../contracts/shared';
+import { allCards } from '../session/selectors';
+import { capitalize, eventLabel, formatClock, REC_STATUS_LABEL, VOICE_REQUEST_LABEL } from '../ui/format';
 import { EvidenceList } from './EvidenceList';
 import { PlayerContext } from './PlayerContext';
 
 interface Props {
-  snapshot: SessionSnapshot;
+  overlay: OverlayState;
+  timeline: SessionTimeline;
   review: Review;
   discarding: boolean;
+  disabled: boolean;
   onRequestDiscard: () => void;
 }
 
@@ -24,29 +26,38 @@ function ListOrEmpty({ items, empty }: { items: string[]; empty: string }) {
   );
 }
 
+const shortId = (id: string) => id.slice(0, 8);
+
 /**
  * End-of-session review (design.md §8). Two clearly separated kinds of content:
- *  - GENERATED summary (here: mock rule-based generator) — interpretation.
- *  - RECORDED events — what was actually logged, with ids and times.
+ *  - GENERATED summary (rule-based, from recorded events) — interpretation.
+ *  - RECORDED events — the engine timeline, with ids and times.
  * Every key moment links to the recorded event it is based on.
  */
-export function SessionReview({ snapshot, review, discarding, onRequestDiscard }: Props) {
-  const { session, events, recommendations, observations } = snapshot;
+export function SessionReview({ overlay, timeline, review, discarding, disabled, onRequestDiscard }: Props) {
+  const { events, truncated } = timeline;
   const eventIds = new Set(events.map((e) => e.id));
+  const started = events.find((e) => e.type === 'session_started')?.time;
+  const ended = events.find((e) => e.type === 'session_ended')?.time;
+  const cards = allCards(overlay);
 
   return (
     <div className="review">
       <header className="review-header">
         <div>
           <p className="eyebrow">Session review</p>
-          <h1>
-            {capitalize(review.activity)} session · Ended
-          </h1>
+          <h1>{capitalize(review.activity)} session · Ended</h1>
           <p className="muted">
-            {formatClock(session.startedAt)}–{formatClock(session.endedAt)} · {events.length} recorded events
+            {formatClock(started)}–{formatClock(ended)} · {events.length} recorded events
+            {truncated ? ' (event log truncated)' : ''}
           </p>
         </div>
-        <button type="button" className="btn btn-danger-outline" onClick={onRequestDiscard} disabled={discarding}>
+        <button
+          type="button"
+          className="btn btn-danger-outline"
+          onClick={onRequestDiscard}
+          disabled={discarding || disabled}
+        >
           {discarding ? 'Discarding…' : 'Discard session'}
         </button>
       </header>
@@ -55,7 +66,7 @@ export function SessionReview({ snapshot, review, discarding, onRequestDiscard }
         <span className="kind kind-generated">Generated summary</span>
         <span>Interpretation produced from the recorded events.</span>
         <span className="kind kind-recorded">Recorded event</span>
-        <span>Logged as it happened, with time and event id.</span>
+        <span>Logged by the session engine as it happened, with time and event id.</span>
       </div>
 
       <div className="review-grid">
@@ -65,8 +76,8 @@ export function SessionReview({ snapshot, review, discarding, onRequestDiscard }
             <span className="kind kind-generated">Generated</span>
           </div>
           <p className="provenance">
-            Produced by the mock rule-based review generator at {formatClock(review.generatedAt)}. Not AI and not live
-            data.
+            Produced at {formatClock(review.generatedAt)} by a rule-based summary of this session’s recorded events.
+            Not AI.
           </p>
           <p className="overview">{review.overview}</p>
 
@@ -83,7 +94,7 @@ export function SessionReview({ snapshot, review, discarding, onRequestDiscard }
                     {m.eventIds.map((id) =>
                       eventIds.has(id) ? (
                         <a key={id} href={`#event-${id}`} className="ref">
-                          event {id.split('-').pop()}
+                          event {shortId(id)}
                         </a>
                       ) : (
                         <span key={id} className="ref ref-missing">
@@ -122,9 +133,9 @@ export function SessionReview({ snapshot, review, discarding, onRequestDiscard }
               {events.map((e) => (
                 <li key={e.id} id={`event-${e.id}`} className={`timeline-item t-${e.type}`} tabIndex={-1}>
                   <span className="timeline-time">{formatClock(e.time)}</span>
-                  <span className="timeline-type">{EVENT_LABEL[e.type] ?? e.type}</span>
+                  <span className="timeline-type">{eventLabel(e)}</span>
                   <span className="timeline-summary">{e.summary}</span>
-                  <span className="timeline-id">event {e.id.split('-').pop()}</span>
+                  <span className="timeline-id">event {shortId(e.id)}</span>
                 </li>
               ))}
             </ol>
@@ -137,11 +148,11 @@ export function SessionReview({ snapshot, review, discarding, onRequestDiscard }
           <h2 id="recs-title">Recommendations this session</h2>
           <span className="kind kind-recorded">Recorded</span>
         </div>
-        {recommendations.length === 0 ? (
+        {cards.length === 0 ? (
           <p className="muted">No recommendations were shown during this session.</p>
         ) : (
           <div className="review-recs">
-            {recommendations.map((r) => (
+            {cards.map((r) => (
               <article key={r.id} className={`review-rec card-${r.status}`}>
                 <div className="card-tags">
                   <span className={`badge badge-${r.urgency}`}>{r.urgency === 'important' ? 'Important' : 'Suggestion'}</span>
@@ -150,11 +161,9 @@ export function SessionReview({ snapshot, review, discarding, onRequestDiscard }
                 </div>
                 <h3>{r.title}</h3>
                 <p>{r.shortAdvice}</p>
-                {r.voiceRequestedAt && (
-                  <p className="muted small">Voice explanation requested at {formatClock(r.voiceRequestedAt)}.</p>
-                )}
-                <PlayerContext players={selectRelatedPlayers(r, session)} />
-                <EvidenceList items={selectEvidence(r, observations)} compact />
+                {r.voice && <p className="muted small">{VOICE_REQUEST_LABEL[r.voice.status]}.</p>}
+                <PlayerContext players={r.relatedParticipants} contextChanged={r.contextChangedSinceCreation} />
+                <EvidenceList items={r.evidence} compact />
               </article>
             ))}
           </div>

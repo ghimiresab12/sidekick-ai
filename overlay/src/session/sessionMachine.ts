@@ -1,7 +1,8 @@
 /**
  * Session lifecycle rules (docs/engineering.md §4, docs/design.md §7) as a
- * transition table. Shared by the mock backend (rejects illegal commands) and
- * the UI (disables buttons), so both always agree.
+ * transition table, used by the UI to disable buttons. It mirrors the engine,
+ * which remains the authority and rejects anything illegal itself. The UI is
+ * stricter in one place: discard is offered only after End (design.md §7).
  *
  *   starting --start--> active <--pause/resume--> paused
  *   active | paused --end--> ended --discard--> discarded
@@ -10,7 +11,7 @@
  * discarded, the session's data no longer exists. Nothing leaves 'ended'
  * except discard, so an ended session can never silently resume.
  */
-import type { SessionStatus } from '../contracts/sidekick';
+import type { SessionStatus } from '../contracts/shared';
 
 export type SessionCommand = 'start' | 'pause' | 'resume' | 'end' | 'discard';
 export type LifecycleState = SessionStatus | 'discarded';

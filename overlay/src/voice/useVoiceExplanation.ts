@@ -5,7 +5,7 @@
  * controller) and re-render whenever it changes — no duplicated useState.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { SidekickDataSource } from '../data/SidekickDataSource';
+import type { SidekickBackend } from '../backend/SidekickBackend';
 import { createSpeechPlayer, getBrowserSpeech, loadVoices, pickLocalVoice, type SpeechPlayer } from './speechService';
 import { createVoiceController, isVoiceBusy } from './voiceController';
 
@@ -14,15 +14,16 @@ export interface VoiceOptions {
   simulateUnavailable?: boolean;
 }
 
-export function useVoiceExplanation(dataSource: SidekickDataSource, options: VoiceOptions = {}) {
+export function useVoiceExplanation(backend: SidekickBackend, options: VoiceOptions = {}) {
   const simulateRef = useRef(!!options.simulateUnavailable);
   simulateRef.current = !!options.simulateUnavailable;
 
   const [controller] = useState(() => {
     let player: SpeechPlayer | null = null;
     return createVoiceController({
-      requestExplanation: (id) => dataSource.requestVoiceExplanation(id),
-      reportPlayback: (id, report) => dataSource.reportVoicePlayback(id, report),
+      requestExplanation: (id) => backend.requestExplanation(id),
+      reportStatus: (requestId, status) => backend.reportVoiceStatus(requestId, status),
+      cancel: (requestId) => backend.cancelExplanation(requestId),
       isSpeechAvailable: () => !simulateRef.current && getBrowserSpeech() !== null,
       findLocalVoice: async () => {
         const speech = getBrowserSpeech();
@@ -58,6 +59,9 @@ export function useVoiceExplanation(dataSource: SidekickDataSource, options: Voi
     explain: controller.explain,
     stop: controller.stop,
     stopIfFor: controller.stopIfFor,
+    silenceForLifecycle: controller.silenceForLifecycle,
+    syncActiveRequest: controller.syncActiveRequest,
+    cancelOnBackend: controller.cancelOnBackend,
     reset: controller.reset,
   };
 }
