@@ -58,10 +58,16 @@ sidekick-ai/
 │   ├── recommendations/      # Dedup / cooldown / staleness rules
 │   ├── engine.ts             # SidekickEngine
 │   └── mock/                 # Clearly labeled mock demo scenario
-└── tests/                    # node:test unit tests for the engine
+├── tests/                    # node:test unit tests for the engine
+└── agent/                    # Imported LiveKit Agent Builder Python starter
+    ├── Dockerfile
+    ├── pyproject.toml
+    └── src/agent.py
 ```
 
 Chert adapter, model adapter, overlay and review generator are **not implemented yet**. The proposed layout for them in `docs/engineering.md` §2 is not code.
+
+The code in `agent/` is a generic LiveKit starter. It does not establish that Chert integration or the product flows in the requirements are implemented. Do not scaffold a fictional API; verify Chert interfaces against the official starter and a live session.
 
 ## Session engine (implemented, mock-only)
 
@@ -125,3 +131,44 @@ For a missed/unsupported Chert capability, report the limitation and demonstrate
 - **How it works:** The backend returns grounded explanation **text** tied to the selected recommendation ID and event evidence; the local UI handles TTS playback, stop/cancel, and an on-screen text fallback. Browser `speechSynthesis` is a candidate, not a finalized tested dependency.
 - **Unchanged:** Continuous group-aware input during an explicitly consented active session; proactive quiet overlay advice; gaming-first hackathon MVP; mandatory event-based end-of-session review.
 - **Dami/PITWALL reconciliation:** Adopt the private companion audio concept and modular Chert + Gemini + session-coordinator architecture, but **do not** expand MVP scope to iMessage, an always-on general assistant, a browser extension, or five separate modes.
+
+## Run the LiveKit agent export
+
+The exported Python agent lives in `agent/`. It is a LiveKit starter and does not yet implement Sidekick's Chert, recommendation, overlay, private voice explanation, or event-review integrations. Keep those capabilities labeled as planned until they are implemented and verified against the real interfaces.
+
+### Local setup (macOS, Windows, and Linux)
+
+1. Install Python 3.13 and the `uv` package manager. The project pins Python to 3.13 in `agent/.python-version`.
+2. Clone the repository and enter the agent directory:
+
+   ```sh
+   git clone https://github.com/ghimiresab12/sidekick-ai.git
+   cd sidekick-ai/agent
+   ```
+
+3. Copy `.env.example` to `.env.local` (`cp .env.example .env.local` in macOS/Linux or `Copy-Item .env.example .env.local` in PowerShell). Set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` using your own LiveKit project credentials. Keep credentials in LiveKit Cloud Secrets for deployed agents; never paste them into chat or commit local env files. The repository ignores `.env.local`.
+4. Install the dependencies and local audio model files:
+
+   ```sh
+   uv sync
+   uv run python src/agent.py download-files
+   ```
+
+5. Run the development agent:
+
+   ```sh
+   uv run python src/agent.py dev
+   ```
+
+The LiveKit export contains no `uv.lock`; `uv sync` resolves the version ranges in `pyproject.toml`. Check in the generated `uv.lock` after dependency resolution when the team is ready to standardize exact package versions.
+
+### Build and run the shared Docker environment
+
+Run these commands from `agent/` after creating `.env.local`:
+
+```sh
+docker build -t sidekick-ai-agent .
+docker run --rm --env-file .env.local sidekick-ai-agent
+```
+
+Docker uses the same Python 3.13 runtime and installs dependencies with `uv`. The container starts the LiveKit agent in `start` mode. CI runs Python checks on macOS, Windows, and Linux, and builds the image on Linux; CI does not deploy.

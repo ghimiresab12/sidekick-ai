@@ -27,7 +27,7 @@ test('snapshot labels condition vs context evidence and contains no internal dat
   value(engine.assignRole(sid, alex.id, 'left defense', { source: 'manual' }));
   clock.set(20);
   const u = say(engine, sid, 2);
-  const obs = value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid), 
+  const obs = value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),
     observedAt: '2026-11-14T18:00:20Z', summary: 'empty', evidenceQuality: 'clear', frameRef: 'frame-123',
   }));
   value(propose(engine, sid)(candidate([obs.id], { contextObservationIds: [u.id], relatedParticipantIds: [alex.id] })));
