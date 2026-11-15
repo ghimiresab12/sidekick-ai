@@ -2,11 +2,11 @@ import type { SessionStatus } from '../contracts/sidekick';
 import type { MockControls as MockControlsApi } from '../data/mockDataSource';
 
 /** Always-visible honesty label (CLAUDE.md rule 10, design.md §3). */
-export function MockBanner() {
+export function MockBanner({ reasoningMode }: { reasoningMode?: 'gemini' | 'deterministic mock' }) {
   return (
     <div className="mock-banner" role="note">
-      <strong>Mock data</strong>
-      <span>Fictional scripted session · Companion panel fallback, not a native FaceTime overlay · Not connected to Chert</span>
+      <strong>Simulation · {reasoningMode ?? 'reasoning mode loading'}</strong>
+      <span>Synthetic inputs flow through the Sidekick session engine · No live Chert/FaceTime media · Companion panel, not a native overlay</span>
     </div>
   );
 }
@@ -24,11 +24,11 @@ export function MockControls({ controls, status, simulateNoSpeech, onSimulateNoS
   const canAdvance = status === 'active' && remaining > 0;
   return (
     <details className="mock-controls">
-      <summary>Demo controls (mock only)</summary>
+      <summary>Simulation controls</summary>
       <div className="mock-controls-body">
         <div>
           <button type="button" className="btn btn-small" onClick={() => void controls.advanceFeed()} disabled={!canAdvance}>
-            Play next scripted observation now
+            Send next synthetic observation
           </button>
           <span className="muted small">
             {' '}

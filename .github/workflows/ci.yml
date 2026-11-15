@@ -10,6 +10,29 @@ permissions:
   contents: read
 
 jobs:
+  node-checks:
+    name: Node, reasoning, and overlay checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            overlay/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: node --test tests/reasoning/*.test.mjs
+      - run: node --test tests/local-service.test.mjs
+      - run: node --check scripts/sidekick-local-server.mjs && node --check scripts/dev-app.mjs
+      - run: npm ci --prefix overlay
+      - run: npm --prefix overlay run typecheck
+      - run: npm --prefix overlay test
+      - run: npm --prefix overlay run build
+
   python-checks:
     name: Python checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

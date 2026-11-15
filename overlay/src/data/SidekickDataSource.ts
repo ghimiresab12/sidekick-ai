@@ -22,6 +22,7 @@ export interface SessionSnapshot {
   recommendations: RecommendationWithContext[];
   observations: Observation[];
   events: TimelineEvent[];
+  reasoningMode?: 'gemini' | 'deterministic mock';
 }
 
 export interface SidekickDataSource {

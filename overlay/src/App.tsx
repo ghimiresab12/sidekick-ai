@@ -16,8 +16,8 @@ import { LiveScreen } from './components/LiveScreen';
 import { MockBanner, MockControls } from './components/MockBanner';
 import { SessionReview } from './components/SessionReview';
 import { ActionErrorBanner, DiscardedScreen, LoadErrorScreen, LoadingScreen } from './components/StateScreens';
-import seed from './data/mock-session.json';
-import { createMockDataSource, type MockDataSource } from './data/mockDataSource';
+import type { MockDataSource } from './data/mockDataSource';
+import { createEngineDataSource } from './data/engineDataSource';
 import { useSidekickSession } from './session/useSidekickSession';
 import { useVoiceExplanation } from './voice/useVoiceExplanation';
 
@@ -28,7 +28,7 @@ interface Instance {
 
 const createInstance = (n: number): Instance => ({
   n,
-  dataSource: createMockDataSource(seed, { sessionId: `mock-session-${n}` }),
+  dataSource: createEngineDataSource(),
 });
 
 export function App() {
@@ -88,7 +88,7 @@ function SidekickApp({ dataSource, onRestart }: { dataSource: MockDataSource; on
   } else if (!snapshot) {
     screen = <LoadErrorScreen message={state.loadError ?? 'Unknown error.'} onRetry={session.retryLoad} />;
   } else if (snapshot.session.status === 'starting') {
-    screen = <ConsentScreen session={snapshot.session} starting={state.pending === 'start'} onStart={() => void session.start()} />;
+    screen = <ConsentScreen session={snapshot.session} starting={state.pending === 'start'} onStart={() => void session.start()} simulation={dataSource.mode === 'mock'} />;
   } else if (snapshot.session.status === 'ended') {
     if (state.review.status === 'ready') {
       wide = true;
@@ -130,7 +130,7 @@ function SidekickApp({ dataSource, onRestart }: { dataSource: MockDataSource; on
 
   return (
     <div className="app">
-      {dataSource.mode === 'mock' && <MockBanner />}
+      {dataSource.mode === 'mock' && <MockBanner reasoningMode={snapshot?.reasoningMode} />}
       <main className={wide ? 'main main-wide' : 'main'}>
         {state.actionError && !state.discarded && (
           <ActionErrorBanner message={state.actionError} onClose={session.clearError} />

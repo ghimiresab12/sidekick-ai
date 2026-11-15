@@ -81,7 +81,7 @@ The code in `agent/` is a generic LiveKit starter. It does not establish that Ch
 
 It has **no** Chert, Gemini, UI or speech-playback code. All inputs in tests and the demo are **mock data**. Contracts and integration points: [`docs/engineering.md`](./docs/engineering.md) §3.
 
-Requires Node.js 22 or newer; the team standard is 24 (`.nvmrc`).
+Requires Node.js 24 or newer (`.nvmrc`).
 
 ```bash
 npm install          # dev dependencies only (typescript, @types/node)
@@ -89,6 +89,23 @@ npm run typecheck    # tsc --noEmit
 npm test             # compile + node:test suite
 npm run demo         # prints the MOCK scenario's timeline (not a live integration)
 ```
+
+## Run the UI + session engine + reasoning simulation
+
+From the repository root, install both Node package sets and start the local app:
+
+```bash
+npm ci
+npm ci --prefix overlay
+npm run dev:app
+```
+
+Open the localhost URL printed by Vite. The UI sends synthetic role/screen observations through
+the in-memory session engine and reasoning provider, then displays the accepted recommendation.
+Without `GEMINI_API_KEY` and `GEMINI_MODEL` in a root `.env`, reasoning uses the deterministic mock;
+with them, Gemini receives only the synthetic demo input. Neither mode connects Chert, FaceTime,
+live screen frames, or the separate Python LiveKit starter. Details and a click-through script are
+in [`overlay/README.md`](./overlay/README.md).
 
 ## Start here (team and coding assistants)
 

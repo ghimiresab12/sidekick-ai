@@ -325,6 +325,29 @@ and re-evaluate if revision changes. Cancel on Pause/End and let the engine reje
 See docs/reasoning.md for complete handoff, limitations and commands. Raw-frame ingestion and live
 Chert remain unverified; the Gemini adapter reasons over supplied summaries, not fetched frameRef media.
 
+## Local overlay-to-engine/reasoning bridge (pre-Chert demonstration)
+
+The local integration path is a loopback-only Node service plus the Vite companion UI. The service
+owns one in-memory `SidekickEngine` session, normalizes the demo transcript/screen inputs, invokes
+the reasoning provider, applies validated context updates through engine methods, re-reads the
+session before accepting recommendation candidates, and pushes translated snapshots to the UI over
+Server-Sent Events. The overlay's data-source adapter calls the local HTTP operations; the UI never
+receives provider credentials or imports the engine/model modules.
+
+The demo feed is synthetic and user-triggered: a scripted transcript assigns Alex to left defense,
+then a structured screen observation describes the uncovered left zone. Without Gemini credentials,
+the backend uses the explicitly labeled deterministic mock provider. With `GEMINI_API_KEY` and an
+explicit `GEMINI_MODEL` set only in the backend environment, it uses the Gemini adapter on the same
+synthetic normalized inputs. In either mode, the session engine remains the final authority for
+recommendation evidence, freshness, lifecycle and deduplication. The UI must continue to label the
+session as simulated; this path does not connect the LiveKit starter, Chert, FaceTime audio or live
+screen frames.
+
+The bridge is a local development/demo adapter, not a public API. Bind only to loopback, do not
+expose it to a network, do not log transcript/model contents, and keep session data in memory. A
+future Chert adapter must replace the synthetic feed with verified Chert events without changing
+the UI contract or claiming that the browser panel is a native FaceTime overlay.
+
 ## Imported LiveKit Agent Builder export (2026-11-14)
 
 The Agent Builder export is integrated under `agent/`; the source and its entrypoint are preserved. Inspection of `agent/src/agent.py` shows a LiveKit `AgentServer` with an `rtc_session` entrypoint, an `AgentSession`, a `DuplexModel` configured as `openai/gpt-live-1`, and the exported ai-coustics audio enhancement hook. The package configuration declares `livekit-agents`, the ai-coustics and noise-cancellation plugins, `python-dotenv`, and `python-handlebars`; the dev group contains pytest, pytest-asyncio, and Ruff. The documented local entrypoint is `uv run python src/agent.py dev`; Docker starts `src/agent.py start`.

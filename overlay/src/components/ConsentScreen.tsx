@@ -6,10 +6,11 @@ interface Props {
   session: Session;
   starting: boolean;
   onStart: () => void;
+  simulation?: boolean;
 }
 
 /** Session setup/consent (design.md §2.1, §7): explicit opt-in before anything is processed. */
-export function ConsentScreen({ session, starting, onStart }: Props) {
+export function ConsentScreen({ session, starting, onStart, simulation = false }: Props) {
   const [agreed, setAgreed] = useState(false);
   const checkId = useId();
   const names = Object.values(session.participants)
@@ -24,10 +25,17 @@ export function ConsentScreen({ session, starting, onStart }: Props) {
       <p className="lead">Sidekick gives your group short, quiet text tips during this session.</p>
 
       <ul className="consent-list">
-        <li>
-          <strong>Continuous processing while active.</strong> Group conversation audio and the shared screen are
-          processed for as long as the session is active, even though Sidekick stays quiet.
-        </li>
+        {simulation ? (
+          <li>
+            <strong>Synthetic demo inputs only.</strong> This simulation does not access your microphone, camera,
+            screen share, or FaceTime call.
+          </li>
+        ) : (
+          <li>
+            <strong>Continuous processing while active.</strong> Group conversation audio and the shared screen are
+            processed for as long as the session is active, even though Sidekick stays quiet.
+          </li>
+        )}
         <li>
           <strong>Quiet by default.</strong> Advice appears as text. Sidekick never speaks on its own.
         </li>
@@ -59,7 +67,9 @@ export function ConsentScreen({ session, starting, onStart }: Props) {
 
       <label className="checkbox" htmlFor={checkId}>
         <input id={checkId} type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
-        <span>Everyone on the call knows Sidekick will process conversation audio and the shared screen, and agrees.</span>
+        <span>{simulation
+          ? 'I understand this simulation uses synthetic transcript and screen observations, not live call media.'
+          : 'Everyone on the call knows Sidekick will process conversation audio and the shared screen, and agrees.'}</span>
       </label>
 
       <button type="button" className="btn btn-primary btn-large" disabled={!agreed || starting} onClick={onStart}>

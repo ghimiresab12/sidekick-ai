@@ -23,7 +23,6 @@ const FORBIDDEN: Array<[string, RegExp]> = [
   ['audio routed to a stream', /createMediaStreamDestination|captureStream\s*\(/],
   ['Web Audio graph', /\bnew\s+(AudioContext|webkitAudioContext)\b/],
   ['call SDK import', /from\s+['"][^'"]*(livekit|chert)[^'"]*['"]/i],
-  ['network calls from the overlay', /\bfetch\s*\(|\bXMLHttpRequest\b|\bnew\s+WebSocket\b/],
 ];
 
 describe('privacy boundary (static)', () => {
@@ -39,6 +38,16 @@ describe('privacy boundary (static)', () => {
       expect(offenders).toEqual([]);
     });
   }
+
+  it('keeps local API traffic inside the same-origin adapter', () => {
+    const network = /\bfetch\s*\(|\bXMLHttpRequest\b|\bnew\s+(WebSocket|EventSource)\b/;
+    const files = Object.entries(sources).filter(([, code]) => network.test(code)).map(([file]) => file);
+    expect(files).toEqual(['./data/engineDataSource.ts']);
+    const adapter = sources['./data/engineDataSource.ts'] ?? '';
+    expect(adapter).toMatch(/fetch\(path/);
+    expect(adapter).toContain("new EventSource('/api/session/stream')");
+    expect(adapter).not.toMatch(/https?:\/\//);
+  });
 
   it('speechSynthesis is used only in voice/speechService.ts', () => {
     const users = Object.entries(sources)
