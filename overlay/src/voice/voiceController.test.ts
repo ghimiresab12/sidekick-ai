@@ -232,4 +232,94 @@ describe('voice controller (engine voice requests)', () => {
     expect(player.cancel).not.toHaveBeenCalled();
     expect(c.getState().status).toBe('speaking');
   });
+
+  it('a terminal report lost to an outage is re-sent after reconnect while the backend still holds the request', async () => {
+    let offline = true;
+    const sent: string[] = [];
+    const { c, handlers } = setup({
+      reportStatus: async (_id, status) => {
+        if (offline) throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+        sent.push(status);
+      },
+    });
+    await c.explain('r1');
+    const id = c.getState().requestId!;
+    handlers().onStart();
+    handlers().onEnd(); // finished while the network was down
+    await flush();
+    expect(c.pendingReports()).toEqual([id]);
+    offline = false;
+    c.connectionRestored({ requestId: id }); // reconnect snapshot: still live on the backend
+    await flush();
+    expect(sent).toContain('finished');
+    expect(c.pendingReports()).toEqual([]);
+  });
+
+  it('an unacknowledged report is dropped when the reconnect snapshot shows the backend already ended it', async () => {
+    const { c, handlers } = setup({
+      reportStatus: async () => {
+        throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+      },
+    });
+    await c.explain('r1');
+    handlers().onStart();
+    c.interruptForConnectionLoss();
+    await flush();
+    expect(c.getState().status).toBe('failed');
+    expect(c.pendingReports()).toHaveLength(1);
+    c.connectionRestored(undefined); // nothing active any more (e.g. timeout or client_disconnected)
+    expect(c.pendingReports()).toEqual([]);
+  });
+
+  it('connection loss while still preparing invalidates the late reply and cancels that request', async () => {
+    let resolve!: (s: ExplanationScript) => void;
+    const { c, player, reports } = setup({ requestExplanation: () => new Promise((r) => (resolve = r)) });
+    const p = c.explain('r1');
+    c.interruptForConnectionLoss();
+    const late = script('r1');
+    resolve(late);
+    await p;
+    await flush();
+    expect(player.speak).not.toHaveBeenCalled();
+    expect(reports).toEqual([[late.request.id, 'cancel']]);
+  });
+
+  it('an unreachable terminal report is retried automatically while the stream stays up (HTTP-only blip)', async () => {
+    let failures = 2;
+    const sent: string[] = [];
+    const { c, handlers } = setup({
+      reportRetryDelaysMs: [0, 0, 0],
+      reportStatus: async (_id, status) => {
+        if (status !== 'finished') return;
+        if (failures-- > 0) throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+        sent.push(status);
+      },
+    });
+    await c.explain('r1');
+    handlers().onStart();
+    handlers().onEnd();
+    for (let i = 0; i < 6; i++) await flush();
+    expect(sent).toEqual(['finished']);
+    expect(c.pendingReports()).toEqual([]);
+  });
+
+  it('automatic retries are bounded, and reset() cancels pending retries', async () => {
+    let calls = 0;
+    const { c, handlers } = setup({
+      reportRetryDelaysMs: [0, 0],
+      reportStatus: async (_id, status) => {
+        if (status !== 'finished') return;
+        calls += 1;
+        throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+      },
+    });
+    await c.explain('r1');
+    handlers().onStart();
+    handlers().onEnd();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(calls).toBe(3); // first send + 2 retries
+    expect(c.pendingReports()).toHaveLength(1); // still waiting for connectionRestored()
+    c.reset();
+    expect(c.pendingReports()).toEqual([]);
+  });
 });

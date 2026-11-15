@@ -92,18 +92,25 @@ function SidekickApp({ backend, onRestart }: { backend: SidekickBackend; onResta
   const overlay = state.overlay;
   const status = overlay?.status;
   const activeVoiceRequest = overlay?.activeVoiceRequest;
-  const { syncActiveRequest, silenceForLifecycle } = voice;
+  const { syncActiveRequest, silenceForLifecycle, syncConnection } = voice;
 
   // The engine is the authority on whether our voice request is still live.
   useEffect(() => {
     syncActiveRequest(activeVoiceRequest);
   }, [activeVoiceRequest, syncActiveRequest]);
 
-  // Safety net: speech never continues outside an active, connected session. The
-  // engine records its own cancel reason (pause/end), so nothing is reported here.
+  // Connection lost: stop speech and report the playback as failed, so the backend does not
+  // keep the request live (which would block every explanation with voice_busy). Connection
+  // back: re-send that report if the reconnect snapshot still shows the request as active.
   useEffect(() => {
-    if (status !== 'active' || !live) silenceForLifecycle();
-  }, [status, live, silenceForLifecycle]);
+    syncConnection(live, activeVoiceRequest);
+  }, [live, activeVoiceRequest, syncConnection]);
+
+  // Safety net: speech never continues outside an active session. The engine records its
+  // own cancel reason (pause/end), so nothing is reported here.
+  useEffect(() => {
+    if (status !== 'active') silenceForLifecycle();
+  }, [status, silenceForLifecycle]);
 
   const leaveActive = async (op: () => Promise<boolean>) => {
     const requestId = voice.silenceForLifecycle();
@@ -187,6 +194,7 @@ function SidekickApp({ backend, onRestart }: { backend: SidekickBackend; onResta
         pending={state.pending}
         allowed={session.allowed}
         operatorResumes={!backend.capabilities.resume}
+        setup={backend.setup}
         voice={voice}
         onPause={() => void leaveActive(session.pause)}
         onResume={() => void session.resume()}
