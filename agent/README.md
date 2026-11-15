@@ -142,11 +142,13 @@ See the [deploying to production](https://docs.livekit.io/deploy/agents/) guide 
 
 Join the [LiveKit Slack Community](https://livekit.io/join-slack) to get help from the LiveKit team and other developers.
 
-## Sidekick transcript forwarding (entrypoint integration pending)
+## Sidekick STT-only transcript forwarding (live verification pending)
 
-`transcript_forwarder.py` is offline-tested infrastructure, not an STT-enabled
-replacement for the current exported `agent.py`. Damius owns that integration.
-Do not treat the existing duplex assistant as quiet-mode Sidekick.
+`agent.py` now integrates the existing BridgeClient and TranscriptForwarder through
+`stt_runtime.py`. This focused extraction derives from Damius's STT work at
+`3b52531`; it excludes video/avatar and Node media-contract changes. Offline tests
+use fake SDK objects and real BridgeClient with in-memory/loopback transports;
+they do not establish a working real FaceTime transcription path.
 
 Configure the agent process with `SIDEKICK_BRIDGE_URL=http://127.0.0.1:8787` and
 `SIDEKICK_AGENT_TOKEN`, alongside its existing LiveKit credentials. Never pass the
@@ -156,7 +158,9 @@ with `SIDEKICK_REASONING=mock SIDEKICK_VISION=none` for local verification.
 The existing `npm run bridge` command builds Node before starting it; use a
 separate workspace if another developer depends on the shared build directory.
 
-The intended synchronous LiveKit event handler is:
+For reference, the helper API is shown below. The entrypoint already owns this
+wiring through ConsentGatedSTTRuntime; do not register a second handler or bypass
+its stream-identity checks:
 
 ```python
 from sidekick_bridge import BridgeClient
@@ -221,9 +225,57 @@ python3 -B -m unittest discover -s agent/tests -p test_transcript_forwarder.py -
 The existing BridgeClient tests also run with unittest but create loopback test
 servers. No LiveKit, Chert or provider access is required for either test module.
 
-After Damius wires the entrypoint, verify one fixed greeting, no pre-consent input,
+During the separately approved live test, verify one fixed greeting, no pre-consent input,
 and one consented spoken sentence reaching Node. For example, register Alex,
 confirm gaming, then say “Alex is responsible for left defense.” Correlate the
 accepted observation ID with the projected speech event and role update. Browser
 timelines intentionally hide raw transcript text. Repeat pause/resume, discard and
 shutdown checks before claiming the real-call path works.
+
+
+### Running the STT-only entrypoint
+
+Use Python 3.13 and the declared dependencies, including direct aiohttp. Start Node
+in a separate host checkout first, with both tokens configured securely:
+
+```bash
+SIDEKICK_REASONING=mock SIDEKICK_VISION=none npm run bridge
+```
+
+Configure the Python process with LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET,
+SIDEKICK_BRIDGE_URL=http://127.0.0.1:8787 and the matching SIDEKICK_AGENT_TOKEN.
+Do not export the control token to Python or put any token into browser variables.
+The entrypoint uses LiveKit Inference `deepgram/nova-3` for STT and `cartesia/sonic-3`
+for its one fixed greeting. No separate Deepgram/Cartesia key is introduced. Provider
+availability, greeting voice defaults and actual Chert delivery remain unverified.
+Starting it can incur provider charges; obtain live-test approval first:
+
+```bash
+cd agent
+env -u SIDEKICK_CONTROL_TOKEN uv run python src/agent.py dev
+```
+
+The operator pairs to the exact `ctx.room.name`, registers Alex, confirms gaming and
+attests all participants agreed. Before that, audio input remains disabled (the one
+connection greeting is the readiness exception). Input also stops on pause, end,
+authentication failure or stale capture state. Resume/replacement uses a new STT
+session and rejects callbacks from retired sessions; the greeting never repeats.
+There is a polling delay before Python learns of operator changes. Node remains
+authoritative, and cancellation cannot recall a POST already accepted.
+
+No camera/screen-share ingestion or synthetic avatar is included. Whether Chert's
+Video call requires an outgoing video track is a REAL-CALL UNKNOWN. Do not quietly
+add video back to fix readiness; report the requirement and review it separately.
+
+Additional offline checks (no credentials, provider requests or secret-file reads):
+
+```bash
+python3 -B -m unittest discover -s agent/tests -p test_stt_runtime.py -v
+python3 -B -m unittest discover -s agent/tests -p test_agent_smoke.py -v
+```
+
+The smoke tests import actual entrypoint code with fake LiveKit/dotenv modules.
+They check disabled input before startup, exact greeting, no LLM, disabled output,
+room text and recording, and cleanup after failure. SDK compatibility itself must
+still be checked with installed Python 3.13 dependencies. Full pytest, Ruff and root
+TypeScript/regression commands remain required before the live test.
