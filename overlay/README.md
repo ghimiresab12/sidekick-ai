@@ -141,8 +141,8 @@ receives `ExplanationContext` (it contains transcript text). The only overlay-de
 - Sound starts only from **Explain with voice**, scoped to one recommendation and one engine voice request.
 - Speech stops on Stop, dismiss of that card, pause, end, discard, connection loss, unmount, tab close,
   whenever the engine drops or replaces `activeVoiceRequest`, and when the bridge refuses a playback report.
-- If the connection drops mid-explanation, speech stops and the request is reported `failed`, re-sent after
-  reconnect if needed, so the bridge never keeps it live (which would block explanations with `voice_busy`).
+- If the connection drops mid-explanation, speech stops and the request is reported `failed`, retried and
+  re-sent after reconnect if needed, so the bridge never keeps it live (which would block explanations with `voice_busy`).
   Reconnecting never restarts speech.
 
 **Must be tested live (CH-4):**

@@ -22,8 +22,9 @@
  * backend until it hears `finished`/`failed`/cancel (or its 60 s timeout), and a live
  * request blocks every other explanation in the session (`voice_busy`). So every terminal
  * report (finish, failure, Stop, a late request after Stop, connection loss) goes through
- * `settle()`: it is re-sent after a reconnect while the backend still shows that request
- * as active, and dropped once the backend accepts it or refuses it (404/409: already over).
+ * `settle()`: if the backend cannot be reached it is re-sent with a short bounded backoff,
+ * and again after a reconnect while the backend still shows that request as active; it is
+ * dropped once the backend accepts it or refuses it (404/409: already over).
  *
  * Connection loss (`interruptForConnectionLoss`): speech stops immediately and the request
  * is reported `failed` (playback did not complete). If that report cannot get through, it
@@ -56,6 +57,12 @@ export interface VoiceControllerDeps {
   findLocalVoice(): Promise<VoiceLike | null>;
   /** Lazily created so unsupported browsers never touch the API. */
   getPlayer(): SpeechPlayer | null;
+  /**
+   * Delays before re-sending an unacknowledged terminal report the backend could not be
+   * reached for, while the live stream stays up (an HTTP-only blip). After the last one, only
+   * `connectionRestored()` re-sends it. Default 0.5 s, 1 s, 2 s, 4 s.
+   */
+  reportRetryDelaysMs?: readonly number[];
 }
 
 export const IDLE_VOICE_STATE: VoiceState = {
@@ -85,6 +92,15 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   /** Terminal reports the backend has not yet acknowledged, by request id. */
   const unacked = new Map<string, () => Promise<void>>();
   const inFlight = new Set<string>();
+  const retryDelays = deps.reportRetryDelaysMs ?? [500, 1_000, 2_000, 4_000];
+  /** Pending automatic re-send per request id, and how many have been made. */
+  const retries = new Map<string, { timer: ReturnType<typeof setTimeout> | undefined; attempts: number }>();
+  const forget = (requestId: string) => {
+    unacked.delete(requestId);
+    const r = retries.get(requestId);
+    if (r?.timer !== undefined) clearTimeout(r.timer);
+    retries.delete(requestId);
+  };
   /** True once OverlayState has shown our request as active (see syncActiveRequest). */
   let seenActive = false;
   const listeners = new Set<() => void>();
@@ -99,15 +115,29 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     const send = unacked.get(requestId);
     if (!send || inFlight.has(requestId)) return;
     inFlight.add(requestId);
+    let retry = false;
     try {
       await send();
-      unacked.delete(requestId);
+      forget(requestId);
     } catch (e) {
-      if (isRefusal(e)) unacked.delete(requestId); // the backend no longer holds it live
-      // Unreachable: kept, and re-sent by connectionRestored() if still active there.
+      if (isRefusal(e)) forget(requestId); // the backend no longer holds it live
+      else retry = unacked.has(requestId); // unreachable: keep it and try again
     } finally {
       inFlight.delete(requestId);
     }
+    if (retry) scheduleRetry(requestId);
+  }
+  /** Bounded automatic re-send; connectionRestored() still re-sends after the last attempt. */
+  function scheduleRetry(requestId: string): void {
+    const r = retries.get(requestId) ?? { timer: undefined, attempts: 0 };
+    const delay = retryDelays[r.attempts];
+    if (r.timer !== undefined || delay === undefined) return;
+    r.attempts += 1;
+    r.timer = setTimeout(() => {
+      r.timer = undefined;
+      void flush(requestId);
+    }, delay);
+    retries.set(requestId, r);
   }
   const settle = (requestId: string, send: () => Promise<void>) => {
     unacked.set(requestId, send);
@@ -277,7 +307,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   function connectionRestored(active: { requestId: string } | undefined): void {
     for (const requestId of [...unacked.keys()]) {
       if (active?.requestId === requestId) void flush(requestId);
-      else unacked.delete(requestId);
+      else forget(requestId);
     }
   }
 
@@ -286,7 +316,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     token += 1;
     if (isVoiceBusy(state)) deps.getPlayer()?.cancel();
     seenActive = false;
-    unacked.clear();
+    for (const requestId of [...unacked.keys()]) forget(requestId);
     set(IDLE_VOICE_STATE);
   }
 
@@ -327,4 +357,3 @@ export function syncVoiceWithConnection(
   if (!live) controller.interruptForConnectionLoss();
   else controller.connectionRestored(active);
 }
-

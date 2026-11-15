@@ -283,5 +283,43 @@ describe('voice controller (engine voice requests)', () => {
     expect(player.speak).not.toHaveBeenCalled();
     expect(reports).toEqual([[late.request.id, 'cancel']]);
   });
-});
 
+  it('an unreachable terminal report is retried automatically while the stream stays up (HTTP-only blip)', async () => {
+    let failures = 2;
+    const sent: string[] = [];
+    const { c, handlers } = setup({
+      reportRetryDelaysMs: [0, 0, 0],
+      reportStatus: async (_id, status) => {
+        if (status !== 'finished') return;
+        if (failures-- > 0) throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+        sent.push(status);
+      },
+    });
+    await c.explain('r1');
+    handlers().onStart();
+    handlers().onEnd();
+    for (let i = 0; i < 6; i++) await flush();
+    expect(sent).toEqual(['finished']);
+    expect(c.pendingReports()).toEqual([]);
+  });
+
+  it('automatic retries are bounded, and reset() cancels pending retries', async () => {
+    let calls = 0;
+    const { c, handlers } = setup({
+      reportRetryDelaysMs: [0, 0],
+      reportStatus: async (_id, status) => {
+        if (status !== 'finished') return;
+        calls += 1;
+        throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+      },
+    });
+    await c.explain('r1');
+    handlers().onStart();
+    handlers().onEnd();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(calls).toBe(3); // first send + 2 retries
+    expect(c.pendingReports()).toHaveLength(1); // still waiting for connectionRestored()
+    c.reset();
+    expect(c.pendingReports()).toEqual([]);
+  });
+});
