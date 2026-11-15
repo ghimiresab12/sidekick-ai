@@ -351,3 +351,48 @@ code { font-size: 0.85em; }
 .spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+/* ── Bridge mode: session setup and operator consent ─────────────────────── */
+.setup {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin: 16px 0;
+  display: grid;
+  gap: 8px;
+}
+.setup-title {
+  font-size: 0.95rem;
+  margin: 4px 0 0;
+}
+.setup-list {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.setup-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.setup-form label {
+  flex-basis: 100%;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.setup-form input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.waiting {
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-top: 8px;
+}

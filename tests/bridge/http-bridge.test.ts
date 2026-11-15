@@ -137,7 +137,7 @@ async function start(options: Options = {}) {
     const id = created.body!.sessionId as string;
     coordinator.engine.addParticipant(id, { displayName: 'Alex' });
     coordinator.engine.confirmActivity(id, 'gaming');
-    const consent = await api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true } });
+    const consent = await api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true, allParticipantsAgreed: true } });
     assert.equal(consent.status, 200);
     return id;
   }
@@ -263,9 +263,12 @@ test('missing or wrong tokens are rejected with 401 before the body is processed
 test('each token is limited to its role (agent cannot grant consent; control cannot ingest)', () => withBridge({}, async (h) => {
   const created = await h.api('POST', '/v1/sessions', { token: AGENT, json: { externalRef: 'r' } });
   const id = created.body!.sessionId as string;
+  // Milestone 4: the trusted control token may create sessions (operator-led demos).
+  assert.equal((await h.api('POST', '/v1/sessions', { token: CONTROL, json: { externalRef: 'x' } })).status, 201);
   const forbidden = [
-    await h.api('POST', '/v1/sessions', { token: CONTROL, json: { externalRef: 'x' } }),
-    await h.api('POST', `/v1/sessions/${id}/consent`, { token: AGENT, json: { consent: true } }),
+    await h.api('POST', `/v1/sessions/${id}/frames`, { token: CONTROL, body: new Uint8Array([1]), headers: { 'content-type': 'image/png', 'x-capture-generation': '1', 'x-observed-at': at(1) } }),
+    await h.api('POST', `/v1/sessions/${id}/pairings`, { token: AGENT, json: {} }),
+    await h.api('POST', `/v1/sessions/${id}/consent`, { token: AGENT, json: { consent: true, allParticipantsAgreed: true } }),
     await h.api('POST', `/v1/sessions/${id}/pause`, { token: AGENT }),
     await h.api('DELETE', `/v1/sessions/${id}`, { token: AGENT }),
     await h.transcript(id, { captureGeneration: 1, observedAt: at(1), text: 'x' }).then(() => h.api('POST', `/v1/sessions/${id}/transcripts`, { token: CONTROL, json: {} })),
@@ -384,18 +387,22 @@ test('bridge configuration is validated', () => {
 
 // ── Consent, generations, lifecycle ────────────────────────────────────────
 
-test('explicit consent is required and must be exactly {"consent": true}', () => withBridge({}, async (h) => {
+test('explicit consent is required: {"consent": true, "allParticipantsAgreed": true} from the operator', () => withBridge({}, async (h) => {
   const created = await h.api('POST', '/v1/sessions', { token: AGENT, json: { externalRef: 'r' } });
   const id = created.body!.sessionId as string;
   const before = await h.transcript(id, { captureGeneration: 1, observedAt: at(1), text: 'hi' });
   assert.deepEqual([before.status, before.body!.error], [409, 'consent_required']);
-  for (const json of [{}, { consent: 'yes' }, { consent: 1 }, { consent: false }]) {
+  for (const json of [{}, { consent: 'yes' }, { consent: 1 }, { consent: false }, { consent: true, allParticipantsAgreed: false }]) {
     const r = await h.api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json });
     assert.equal(r.status, 400, JSON.stringify(json));
   }
-  const ok = await h.api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true } });
+  // A bare consent click is NOT treated as every participant's agreement.
+  const bare = await h.api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true } });
+  assert.deepEqual([bare.status, bare.body!.error], [400, 'all_participants_agreement_required']);
+  assert.equal((await h.capture(id)).status, 'starting', 'observation not enabled');
+  const ok = await h.api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true, allParticipantsAgreed: true } });
   assert.deepEqual([ok.status, ok.body!.status, ok.body!.captureGeneration, ok.body!.acceptingInput], [200, 'active', 1, true]);
-  const again = await h.api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true } });
+  const again = await h.api('POST', `/v1/sessions/${id}/consent`, { token: CONTROL, json: { consent: true, allParticipantsAgreed: true } });
   assert.deepEqual([again.status, again.body!.error], [409, 'invalid_transition']);
 }));
 

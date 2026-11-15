@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ExplanationScript } from '../contracts/pending';
+import type { ExplanationScript } from '../contracts/shared';
 import type { SpeakHandlers, SpeechPlayer, VoiceLike } from './speechService';
 import { createVoiceController, type VoiceControllerDeps } from './voiceController';
 
@@ -202,5 +202,34 @@ describe('voice controller (engine voice requests)', () => {
     expect(player.cancel).toHaveBeenCalled();
     expect(c.getState().status).toBe('idle');
     expect(reports).toEqual([]);
+  });
+
+  it('a refused playing_locally report (explanation already over) stops speech and is not retried', async () => {
+    const calls: string[] = [];
+    const { c, player, handlers } = setup({
+      reportStatus: async (_id, status) => {
+        calls.push(status);
+        throw Object.assign(new Error('That explanation has already ended.'), { code: 'voice_request_not_found' });
+      },
+    });
+    await c.explain('r1');
+    handlers().onStart();
+    await flush();
+    expect(player.cancel).toHaveBeenCalled();
+    expect(c.getState().status).toBe('cancelled');
+    expect(calls).toEqual(['playing_locally']);
+  });
+
+  it('an unreachable backend does not stop local playback (connection loss is handled by the app)', async () => {
+    const { c, player, handlers } = setup({
+      reportStatus: async () => {
+        throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+      },
+    });
+    await c.explain('r1');
+    handlers().onStart();
+    await flush();
+    expect(player.cancel).not.toHaveBeenCalled();
+    expect(c.getState().status).toBe('speaking');
   });
 });

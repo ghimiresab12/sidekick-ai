@@ -100,7 +100,7 @@ A permissioned Chrome extension remains **a contingency only** if the verified C
 
 ## 8. Overlay companion UI (`overlay/`)
 
-**Status (2026-11-15, branch `feature/overlay-backend-integration`):** the overlay consumes the shared contracts in `src/contracts/types.ts` (type-only re-export in `overlay/src/contracts/shared.ts`; the old provisional copies are deleted). By default it runs the **real** `SidekickEngine`, `SidekickCoordinator` and `reason()` with the **deterministic mock provider** inside the page, fed by a synthetic two-step demo feed. It is not connected to Chert, FaceTime, LiveKit, Gemini or live screen frames. It remains a standalone Vite app with its own `package.json`; the root `tsconfig.json`, `npm test` and CI do not include `overlay/`.
+**Status (2026-11-15):** the overlay consumes the shared contracts in `src/contracts/types.ts` (type-only re-export in `overlay/src/contracts/shared.ts`). **By default it is a client of the Node bridge's browser API** (milestone 4): it is served by the bridge at `/ui/`, pairs with a one-time code and receives `OverlayState` over same-origin SSE; the bridge owns all session state. `vite --mode simulation` instead runs the real `SidekickEngine`, `SidekickCoordinator` and `reason()` with the **deterministic mock provider** inside the page, fed by a synthetic feed (development only; excluded from the default build). Verified against the bridge with mocks only; not connected to Chert, FaceTime, LiveKit, live Gemini or live screen frames. It remains a standalone Vite app with its own `package.json`; the root `tsconfig.json`, `npm test` and CI do not include `overlay/`.
 
 **Toolchain notes:** the overlay type-checks the shared modules with its own TypeScript 5.9.3 (root uses 7.0.2; both compile the shared code today). `allowImportingTsExtensions` (with `noEmit`) lets it import the reasoning `.mts` modules. `src/engine.ts` imports `randomUUID` from `node:crypto`; the overlay maps that single import to Web Crypto (`overlay/src/backend/browserCrypto.ts`) through a Vite alias and a matching `paths` entry. No backend file is modified.
 
@@ -111,10 +111,10 @@ A permissioned Chrome extension remains **a contingency only** if the verified C
 | `typescript` 5.9.3, `@types/react` 18.3.31, `@types/react-dom` 18.3.7 | dev | Type-checking for the overlay and the shared contracts it imports |
 | `vitest` 4.1.12 | dev | Unit and end-to-end tests (real coordinator), voice logic, privacy boundary |
 
-- **No new dependencies** in this integration. No UI kit, state library, router or network client.
-- **Private voice:** browser `speechSynthesis`, **on-device voices only** (`localService === true`); otherwise a labeled text fallback. The overlay and every backend module it bundles contain no WebRTC, media-capture, LiveKit/Chert, network or Gemini code (enforced by `overlay/src/privacyBoundary.test.ts`).
+- **No new dependencies** in this integration. No UI kit, state library, router or network client: the HTTP backend uses the browser's own `fetch` and `EventSource`.
+- **Private voice:** browser `speechSynthesis`, **on-device voices only** (`localService === true`); otherwise a labeled text fallback. The overlay and every backend module it bundles contain no WebRTC, media-capture, LiveKit/Chert or Gemini code, and only `overlay/src/backend/httpBackend.ts` may use the network (same-origin bridge only); the rest has no network code (enforced by `overlay/src/privacyBoundary.test.ts`).
 - **Still requires live testing (CH-4):** acoustic pickup through speakers, OS-level screen-share audio capture, and user-gesture rules on the target device.
-- **Integration seam:** `overlay/src/backend/SidekickBackend.ts`. A live implementation is needed once the overlay-facing backend API is agreed with the backend developer (pending); requirements are in `overlay/README.md` and `docs/overlay-live-backend.md`.
+- **Integration seam:** `overlay/src/backend/SidekickBackend.ts`, implemented by `httpBackend.ts` (default, the bridge's browser API in `docs/engineering.md` "Integration milestone 4") and `inProcessBackend.ts` (simulation). `overlay/scripts/bridge-demo.mjs` runs the real bridge with mocked inputs for local end-to-end testing; it uses no extra dependency.
 
 ## Decision update — private explanation (confirmed 2026-11-14)
 
@@ -170,3 +170,10 @@ See [vision.md](vision.md) for the controlled-scene profile and limitations.
 
 - `SIDEKICK_VISION` (`none` default, or `gemini`) connects Prabin's existing `src/adapters/model/gemini-vision.mts` to the bridge. It reuses `GEMINI_API_KEY` and `GEMINI_MODEL`, the same model as reasoning.
 - **No new dependencies.** `tsconfig.reasoning-compat.json` already type-checks `src/bridge/*.mts`, including the new `vision-wiring.mts`, against the adapter.
+
+### Overlay ↔ bridge API (milestone 4, 2026-11-15)
+
+- Still Node built-ins only: `node:http`, `node:crypto`, `node:fs`, and SSE written by hand. **No new dependencies.**
+- New optional server-only variables: `SIDEKICK_UI_DIR` and `SIDEKICK_UI_DEV_ORIGIN`.
+- New script: `npm run pair -- --room <room> [--participant <name>]` prints a one-time pairing URL. The control token is never printed.
+- Deployment stays **localhost only**.

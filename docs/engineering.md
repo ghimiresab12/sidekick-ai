@@ -500,28 +500,28 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 | Method and path | Token | Body | Calls | Success |
 |---|---|---|---|---|
 | `GET /v1/health` | none | — | — | `200 {ok:true}` |
-| `POST /v1/sessions` | agent | `{externalRef}` (room name) | `createSession` | `201` new / `200` existing non-ended session for that room |
+| `POST /v1/sessions` | agent, control (milestone 4) | `{externalRef}` (room name) | `createSession` | `201` new / `200` existing non-ended session for that room |
 | `GET /v1/sessions/:id/capture` | either | — | engine read | `{sessionId, status, consentGiven, captureGeneration, acceptingInput}` |
 | `POST /v1/sessions/:id/transcripts` | agent | JSON `{captureGeneration, observedAt, text, speakerRef?}` (no other keys) | `ingestConversation` | `202 {observationId, captureGeneration, observedAt}` |
 | `POST /v1/sessions/:id/frames` | agent | raw `image/jpeg\|png\|webp` bytes; headers `X-Capture-Generation`, `X-Observed-At` | `ingestFrame` (awaits vision) | `200 {observationId, captureGeneration, observedAt}` |
-| `POST /v1/sessions/:id/consent` | control | exactly `{"consent": true}` | `startWithConsent` | `200` lifecycle view |
-| `POST /v1/sessions/:id/pause` / `resume` / `end` | control | **none** (any declared body is rejected) | `pause` / `resume` / `end` | `200` lifecycle view |
-| `DELETE /v1/sessions/:id` | control | **none** | `discard` | `204` |
+| `POST /v1/sessions/:id/consent` | control **only** | exactly `{"consent": true, "allParticipantsAgreed": true}` (milestone 4: the operator attests that **all** participants agreed) | `startWithConsent` | `200` lifecycle view |
+| `POST /v1/sessions/:id/pause` / `resume` / `end` | control, ui (milestone 4) | **none** (any declared body is rejected) | `pause` / `resume` / `end` | `200` lifecycle view |
+| `DELETE /v1/sessions/:id` | control, ui (milestone 4) | **none** | `discard`, plus revoking all UI cookies | `204` |
 
 **Status codes:**
 
 | Status | Codes |
 |---|---|
-| 400 | `invalid_input`, `invalid_json`, `invalid_timestamp`, malformed `invalid_generation`, `explicit_consent_required`, `unexpected_body` |
-| 401 | `unauthorized` |
-| 403 | `forbidden`, `forbidden_origin`, `forbidden_host` |
+| 400 | `invalid_input`, `invalid_json`, `invalid_timestamp`, malformed `invalid_generation`, `explicit_consent_required`, `all_participants_agreement_required`, `unexpected_body` |
+| 401 | `unauthorized`, `invalid_pairing` |
+| 403 | `forbidden`, `forbidden_origin`, `forbidden_host`, `csrf_rejected`, `not_request_owner` |
 | 404 | `not_found`, `session_not_found` |
 | 405 | `method_not_allowed` |
 | 409 | `consent_required`, `session_not_active`, `invalid_transition`, lifecycle `invalid_generation`, `stale_evidence`, `aborted` |
 | 413 | `payload_too_large` |
 | 415 | `unsupported_media_type` |
 | 422 | `timestamp_out_of_range` |
-| 429 | `observation_limit_reached`, `vision_busy` (adapter-local concurrency limit, **not** provider rate limiting) |
+| 429 | `observation_limit_reached`, `vision_busy` (adapter-local concurrency limit, **not** provider rate limiting), `pairing_rate_limited`, `too_many_streams` |
 | 502 | `vision_failed` (provider HTTP errors including provider 429, invalid model output) |
 | 503 | `vision_unavailable` |
 | 504 | `vision_timeout` (bridge frame deadline, or the adapter's own timeout) |
@@ -605,3 +605,152 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 - **Controlled scene only:** Gemini vision understands only the `controlled-soccer-v1` simulation (`docs/vision.md`), not arbitrary games.
 - **Billing and data:** with `SIDEKICK_VISION=gemini`, every accepted frame is sent to Google's API (billable).
 - **Not yet measured:** real latency, rate limits and accuracy.
+
+## Integration milestone 4 — overlay ↔ bridge API (implemented 2026-11-15, mock-tested)
+
+**Status:**
+- **Implemented:** the browser API, pairing, live state stream and same-origin UI serving in the Node bridge.
+- **Tested:** end-to-end HTTP tests against the production runtime, with mock reasoning and Gemini vision mocked at the HTTP level. A network guard proves zero external calls.
+- **Not done:** the overlay (`overlay/`) is **not changed** in this milestone; it still defaults to its in-process simulation until Tunji adds the HTTP backend below. **Localhost only:** the bridge binds `127.0.0.1` and is not a deployable public service.
+- **Overlay follow-up (overlay workstream, after this milestone):** the overlay's HTTP backend is implemented and is now the default; see "Overlay adoption status" below. Tested against this bridge with mocks only.
+
+### Architecture
+
+- **Single owner of state:** the Node bridge process is the **only** owner of the engine, the coordinator and live session state. The browser is a client. The live UI must not create its own engine or coordinator; the in-process simulation remains an explicitly selected development mode.
+- **Same-origin serving:** the built overlay is served at `http://127.0.0.1:<port>/ui/` from `SIDEKICK_UI_DIR`, defaulting to `overlay/dist` if present.
+- **Pairing:**
+  1. The operator, holding `SIDEKICK_CONTROL_TOKEN`, creates a one-time code with `POST /v1/sessions/:id/pairings`, or with `npm run pair -- --room <room> [--participant <name>]`.
+  2. The browser opens `/ui/#pair=<code>`. The code is in the URL fragment, so it is never sent in requests, logs or `Referer` headers.
+  3. The browser exchanges the code with `POST /v1/ui/pair` and receives a cookie: `sidekick_ui=<256-bit random>; HttpOnly; SameSite=Strict; Path=/v1`.
+- **Credential rules:**
+  - The cookie is bound to **exactly one session**; any other session ID answers `404 session_not_found`.
+  - It is a browser-session cookie with a 30-minute server-side idle expiry. Authenticated requests, every stream heartbeat and stream close all count as activity, so a passive viewer can reconnect after a network blip without re-pairing. A credential with no stream and no requests for 30 minutes expires.
+  - At most `maxStreamsPerClient` (default 2) open streams per credential, within the session cap (default 4), so one browser cannot lock others out → `429 too_many_streams`.
+  - Discard revokes every UI cookie of the session.
+  - A bridge restart revokes everything, because all state is in memory.
+- **Codes:** 12 characters from a 30-symbol alphabet (about 59 bits), uniformly random, one-time, valid 120 s, and stored only as hashes. Failed redemptions are limited to 5 per minute, after which **all** redemptions are refused until the window passes.
+- **Tokens never reach the browser:** `SIDEKICK_AGENT_TOKEN` and `SIDEKICK_CONTROL_TOKEN` are never exposed to browser JavaScript, and any bearer request carrying an `Origin` header is refused.
+
+### Browser security rules
+
+- **Origins:** foreign `Origin` → `403 forbidden_origin` on every route. Allowed origins are `http://127.0.0.1:<port>`, `http://localhost:<port>` and, optionally, `SIDEKICK_UI_DEV_ORIGIN` (exactly `http://localhost:<port>` or `http://127.0.0.1:<port>`).
+- **CSRF:** every browser state change (cookie-authenticated, or pairing) needs the bridge's own `Origin` **and** `X-Sidekick-UI: 1`; otherwise `403 csrf_rejected`. No CORS headers are ever sent. GET requests are read-only.
+- **Headers:** UI and API responses carry `Content-Security-Policy` (`default-src 'none'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; …`), plus `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`, a Permissions-Policy denying camera, microphone and display capture, and `Cache-Control: no-store`.
+- **Static files: trusted build directory, immutable in-memory snapshot** (`src/bridge/static-ui.ts`). Security model chosen for the hackathon MVP:
+  1. **Trusted build-directory loading at startup.** The approved overlay assets are read **once, synchronously, while the bridge is created**, before it can accept any request. The configured build directory (`SIDEKICK_UI_DIR`, or `overlay/dist` when present) **and its parent directories are trusted during startup**: no untrusted process may modify the build tree while the snapshot is being built. Run the bridge only against a build directory that you (the operator's user account) produced and control.
+  2. **Rejection of unsafe assets encountered during normal loading.** Startup fails with an explicit error (`StaticUiError` → `RuntimeConfigError`, printed by `npm run bridge`, exit 1) in these cases:
+     - the directory is missing or not a directory, or has no `index.html`;
+     - there is a symbolic link anywhere below the UI root, a hard-linked asset (nlink > 1), or a FIFO, socket or device;
+     - on POSIX, any directory or file is not owned by the bridge's user, or is group- or world-writable;
+     - a size, count or depth limit is exceeded;
+     - an entry vanishes or changes while it is being read.
+
+     Hidden entries (dot-prefixed, including whole hidden directories such as `.vite/`), source maps, `.ts`/`.tsx` sources, `.env` and every unsupported extension are **never loaded**, so they never enter memory. Loaded types: html, js, css, svg, png, ico, woff2, json, with fixed MIME types and the security headers above.
+  3. **Request-time filesystem isolation after startup.** Requests (GET/HEAD) are answered only from the immutable in-memory map by exact-path lookup. The request path never resolves, opens or reads a filesystem path, so modifying, replacing (with a directory or a symlink) or deleting the build directory after startup cannot change what is served. A rebuilt overlay needs a bridge restart.
+  4. **Remaining risk: concurrent modification during startup.** The loader does **not** use descriptor-anchored traversal (Node has no `openat`-style directory API) and does **not** guarantee race freedom. A process with write access to the build tree or its parents that swaps directories or symlinks *while the snapshot is being built* can still cause content from outside the build directory to be loaded; Codex reproduced this. The `O_NOFOLLOW` open, the inode comparisons before and after reading, and the permission checks are **best-effort hardening** that notice some such changes, not a guarantee. Under the trusted-build-directory model this is accepted: such a process would normally already run as the operator's user and could read `.env` directly.
+  - **Memory limits** (`createBridge({ uiLimits })`): 10 MiB per file, 64 MiB total, 2000 files, nesting depth 16.
+  - **What the tests establish:** unsafe entries present during normal loading are rejected; the specific swaps the tests inject between checking and opening a file are rejected (examples, not a proof of race freedom); after startup, served content is unchanged when the build directory is modified, replaced or deleted. For comparison, an attacker loop swapping a parent directory for a symlink made the previous per-request implementation serve outside content 1,970 times in 6 s; against the snapshot (attacker active after startup) it served outside content 0 times in 199,900 requests. No test establishes unconditional provenance of the startup snapshot.
+- **Logging:** pairing codes, cookies, tokens, transcript text and frames are never logged; the request log stays content-free.
+
+### Consent (MVP)
+
+- **Consent stays session-level and operator-only:** `POST /v1/sessions/:id/consent` with `{"consent": true, "allParticipantsAgreed": true}`, using the control token.
+- **The attestation is required:** the operator confirms that **every** participant agreed. A UI click is never treated as group consent; UI cookies get `403` on this route, and `{"consent": true}` alone gets `400 all_participants_agreement_required`.
+- **What the UI shows:** `OverlayState.status === 'starting'` means observation is not enabled. The UI should show that it is waiting for the operator's all-participants confirmation, and must not offer a consent button.
+- **Out of scope:** per-participant consent is not implemented in this milestone.
+- **Resume is operator-only:** a paired browser may pause, end or discard (stop is always available), but `POST /resume` requires the control token; UI cookies get `403 forbidden`. Restarting observation is a group decision, like consent.
+
+### Coordinator additions
+
+`addParticipant` and `confirmActivity` pass through to the engine and **re-run reasoning** over existing evidence. `addParticipant` enforces `MAX_PARTICIPANTS = 20` (matching the reasoning validator, so a 21st participant can no longer silently disable reasoning) → `409 participant_limit_reached`, and rejects duplicate display names → `409 duplicate_participant`. Names are compared after NFKC normalization, removal of invisible characters (soft hyphen, zero-width, BOM), whitespace collapsing and Unicode case folding (`Alex`/`ALEX`/` Alex `/`Ａｌｅｘ`, `Strauß`/`STRAUSS`). Rejected requests change nothing; participants are never deleted and engine identity contracts are unchanged.
+
+**One name normalization policy, applied to the stored name** (`normalizeDisplayName`): NFKC, every Unicode format character removed (`\p{Cf}`: soft hyphen, zero-width space/joiners, bidi controls, word joiner, BOM) plus control characters, variation selectors and blank filler letters (Hangul fillers, braille blank, combining grapheme joiner), whitespace collapsed, trimmed, NFC. A name must still contain a visible letter, digit or symbol, otherwise `400 invalid_participant_name`, checked before any engine change or reasoning run. Letters, marks and digits of every script are preserved (`José`, `李小龙`, `Nguyễn Ngọc`, `श्रेया`, `🎮 Gamer`). The duplicate key is that stored name, case-folded. Known trade-off: removing ZWNJ/ZWJ can alter the rendering of some Persian or Indic names. Selection still enforces the stale window and generations, so stale frames never produce cards. `dismiss`, `requestExplanation`, `reportVoiceStatus` and `cancelExplanation` are pass-throughs, so every state change goes through the coordinator.
+
+### Private voice ownership and disconnects
+
+- **Ownership:** each explanation request is owned by the UI client (cookie) that made it. Status reports and cancellation from any other client → `403 not_request_owner`. Any request that is no longer live (finished, failed, cancelled, timed out, or gone with the session) → `404 voice_request_not_found` for every status report and cancel: the bridge sweeps engine timeouts and prunes ownership before checking. Ownership records are also dropped when a live-state update shows no active request, on pause/end/discard, and by the disconnect-grace timer. Request IDs stay unique. Only one live explanation per session (engine rule) → `409 voice_busy`.
+- **Lifecycle:** pause, end and discard cancel the request (engine).
+- **Disconnects:** a client's request is cancelled with `client_disconnected` **only** after it has had no open stream and no authenticated request for `voiceDisconnectGraceMs` (15 s). Short stream reconnects never cancel playback. The engine's 60 s voice timeout is the backstop.
+
+### Browser privacy projection (M5)
+
+The engine keeps raw evidence (goal utterances, decision text, role text) internally for reasoning; nothing in engine storage or Prabin's model contracts changed. Every browser-facing response goes through an explicit server-side projection in `src/privacy/browser-projection.ts`:
+
+- **Timeline** (`BrowserSessionTimeline`): `goal_set` has no `text` (summary `Group goal stated`); `goal_retired` → `Group goal retired`; `decision_recorded` has no `decision.text` (summary `Group decision recorded`); transcript observations → `Speech observed (<name or "speaker unverified">)`; role changes are rebuilt from safe labels.
+- **Roles** (SSE cards' `relatedParticipants`, participant list, timeline, explanations): shown only if they are on the explicit allowlist of controlled-demo positions (`CANONICAL_ROLES`: left/right/center defense, left/right/center back, defense, defender, goalkeeper, goalie, keeper, midfield, midfielder, left/right wing(er), attack, attacker, forward, striker, backup coverage, backup). Matching ignores case, hyphens, a leading "the/our/their" and NFKC compatibility forms; spelling variants collapse (`defence` → `defense`, `centre` → `center`). **Every other role**, including short alphabetic text such as "password banana", becomes the fixed label `assigned role`. Extending the list is a privacy decision.
+- **Explicit construction:** every browser object (live state, cards, evidence, participants, voice requests, timeline events and their nested `change`/`decision`) is built field by field from an approved list. Nothing spreads an internal object, so a field added to an engine type later does not leak by default. Timeline summaries are rebuilt from structured fields (names, card titles, fixed wording); the engine's summary text is used only for screen observations, whose summary is the vision adapter's fixed, image-derived wording.
+- **Explanations** never quote transcript-derived text: a goal is mentioned only as "The group had stated a goal related to this advice."
+- Regression tests plant distinctive markers in goal, decision and role utterances and assert they appear in the engine but in no SSE event, timeline, participant list, explanation or other browser response.
+
+### Frontend contract for Tunji (exact)
+
+**Startup flow:**
+1. On load, if `location.hash` has `#pair=<code>`: `POST /v1/ui/pair`, then remove the fragment with `history.replaceState`.
+2. Otherwise (reload, new tab): `GET /v1/ui/session`. `200 { ok, sessionId, participantId? }` → open the stream for that session. The code is never reused; the HttpOnly cookie alone recovers the session.
+3. `401` from either step (expired, revoked, malformed or missing cookie) → show "ask the operator for a new pairing link".
+
+**Request rules:**
+- Use `fetch` with `credentials: 'same-origin'`.
+- Every non-GET request must carry `X-Sidekick-UI: 1` and either `Content-Type: application/json` with a body, or no body.
+- Errors look like `{ ok: false, error: <code> }`. **401 means re-pair.**
+
+| Method and path | Body | Response (success) |
+|---|---|---|
+| `POST /v1/ui/pair` | `{ code }` (from `location.hash` `#pair=`) | `200 { ok, sessionId, participantId? }` plus HttpOnly cookie. Afterwards, remove the fragment with `history.replaceState`. |
+| `GET /v1/ui/session` | — | `200 { ok, sessionId, participantId? }` for the cookie's own session; `401` (cookie cleared) otherwise |
+| `GET /v1/sessions/:id/stream` | — (`EventSource`, same origin) | SSE: `event: state` with `id: <version>` and `data: OverlayState`. `event: discarded` → the session is gone; stop and show it as ended. Ignore any `version` that is not greater than the last one applied. |
+| `GET /v1/sessions/:id/participants` | — | `{ ok, participants: [{ id, displayName, role? }] }` |
+| `POST /v1/sessions/:id/participants` | `{ displayName }` | `201 { ok, id, displayName }` (`displayName` is the **normalized** name; display that one); `400 invalid_participant_name`; `409 duplicate_participant` / `participant_limit_reached` |
+| `POST /v1/sessions/:id/activity` | `{ "activity": "gaming" }` | `200 { ok, sessionId, status, consentGiven, captureGeneration, acceptingInput, activity, activityConfirmed }` |
+| `POST /v1/sessions/:id/pause` / `end` | none | `200 { ok, sessionId, status, consentGiven, captureGeneration, acceptingInput }` |
+| `DELETE /v1/sessions/:id` | none | `204` and the cookie is cleared |
+| `POST /v1/sessions/:id/recommendations/:rid/dismiss` | none | `200 { ok }` |
+| `POST /v1/sessions/:id/recommendations/:rid/explanation` | none | `200 { ok, request: VoiceRequest, text, refersToEarlierObservation }` (`ExplanationScript`) |
+| `POST /v1/sessions/:id/voice/:requestId/status` | `{ status: 'playing_locally' \| 'finished' \| 'failed' }` | `200 { ok, request: VoiceRequest }` |
+| `POST /v1/sessions/:id/voice/:requestId/cancel` | none | `200 { ok, request: VoiceRequest }` (reason `user`) |
+| `GET /v1/sessions/:id/timeline` | — | `200 { ok, events: BrowserSessionEvent[], truncated }` (`BrowserSessionTimeline`; no goal or decision wording) |
+
+**Changes Tunji needs to adopt:**
+1. **Shared types:** import `ExplanationScript` and `BrowserSessionTimeline` from `src/contracts/types.ts` and delete his copies in `overlay/src/contracts/pending.ts`. The explanation shape is identical; the timeline omits goal `text` and `decision.text` (show the event summaries instead).
+2. **Explanation text:** generated server-side by `src/explanations/explanation-text.ts`, a port of his template with identical behaviour. The in-process backend should import it and delete `overlay/src/backend/explanationText.ts`.
+3. **HTTP backend:** add an implementation of `SidekickBackend` (pairing bootstrap, `EventSource`, the routes above). It is the default for the served build; the in-process simulation should only be loaded when explicitly selected (lazy import), so the live bundle never contains an engine.
+4. **Build:** set the Vite `base` to `/ui/`. Disable production source maps (they are never served anyway). The bridge snapshots `overlay/dist` at startup, so restart `npm run bridge` after every `vite build`; a bad build (symlinks, missing `index.html`, files over the limits) stops the bridge with an explicit error.
+5. **UI controls:** add participant registration (show the 400 invalid-name and 409 duplicate/limit errors; display the returned normalized name) and a "Confirm gaming" control. Show "waiting for operator consent" while `status === 'starting'`; no consent button. Offer pause/end, but **no resume button**: while paused, show "paused — the operator resumes".
+6. **Voice:** report playback by `request.id`. Treat `404 voice_request_not_found` as "this explanation is over": stop speaking, don't retry. Stop speaking when `activeVoiceRequest` disappears or changes, or when a call returns `409`.
+7. **CSP check:** verify the production build works under the CSP above (no inline scripts or styles in markup).
+8. **CI:** add an overlay test job, coordinated with whoever owns CI.
+
+### Overlay adoption status (overlay workstream, 2026-11-15)
+
+No bridge, coordinator or shared-contract code was changed for this. Status of the eight items above:
+
+1. **Shared types: done.** `ExplanationScript` and `BrowserSessionTimeline` come from `src/contracts/types.ts`; the overlay's copies are deleted. `overlay/src/contracts/pending.ts` keeps only `SessionReview` (§8 proposal; no review service exists).
+2. **Explanation text: done.** The in-process simulation imports `src/explanations/explanation-text.ts`; `overlay/src/backend/explanationText.ts` is deleted. The simulation also applies `src/privacy/browser-projection.ts`, so both modes return the same browser shapes.
+3. **HTTP backend: done.** `overlay/src/backend/httpBackend.ts` implements `SidekickBackend` (pairing bootstrap, `GET /v1/ui/session` recovery, `EventSource`, the routes above). It is the default. The simulation is selected only by `vite --mode simulation`; the flag is a build-time constant, so the default build contains no engine, coordinator or reasoning code.
+4. **Build: done.** Vite `base` is `/ui/`, production source maps are off, and the dev server proxies `/v1` to the bridge (needs `SIDEKICK_UI_DEV_ORIGIN=http://localhost:5173`).
+5. **UI controls: done.** Participant registration (shows the returned normalized name and the 400/409 errors), "Confirm gaming", "Waiting for the operator" while `starting` with no consent button, Pause/End but no Resume button ("Paused — the operator resumes").
+6. **Voice: done.** Playback is reported by `request.id`. A refused `playing_locally` report (e.g. `404 voice_request_not_found` or a 409) stops speech locally with no retry; speech also stops when `activeVoiceRequest` disappears or changes.
+7. **CSP: verified** with the production build served by the bridge in headless Chrome: no CSP violations.
+8. **CI: not done.** Still needs whoever owns CI.
+
+**Verification:** overlay unit tests (fake fetch and `EventSource`) plus a headless-Chrome run against the production bridge runtime with mock reasoning, mocked Gemini vision HTTP and synthetic agent input (`overlay/scripts/bridge-demo.mjs`). Not tested with Chert, the Python agent or live Gemini. The session review is still built in the browser from `BrowserSessionTimeline` (rule-based; no backend review service).
+
+### Environment
+
+All of these are server-only.
+- `SIDEKICK_UI_DIR`: optional. Unset → `overlay/dist` if present; otherwise `/ui/` answers 404.
+- `SIDEKICK_UI_DEV_ORIGIN`: optional. Allows the Vite dev server origin, e.g. `http://localhost:5173`. The bridge sends no CORS headers and answers no `OPTIONS` preflight, so the dev server must **proxy** `/v1` to the bridge (Vite `server.proxy`); direct cross-origin fetches will fail.
+- **Pairing and stream timings** are code-level options (`createBridge({ ui })`), not environment variables.
+
+### Known limitations (milestone 4)
+
+- **Localhost only.** Cookies are not isolated by port: any other local web app on `localhost`/`127.0.0.1` shares the cookie jar, so don't run untrusted local web servers during a session. The `SameSite=Strict`, `Origin` and `X-Sidekick-UI` checks still block cross-site requests.
+- **Pairing rate limit is global:** someone hammering `/v1/ui/pair` with wrong codes can block all pairing for the window (a local denial of service, not a bypass).
+- **Static types** are allow-listed; other asset types from the overlay build are not loaded until added. Build output must be real files (no symlinks or hard links), owned by the bridge's user, not group- or world-writable; rebuilding requires restarting the bridge.
+- **Static snapshot trust assumptions:**
+  - The build directory and its parents are trusted during bridge startup; no untrusted process may modify them while the snapshot is built (see "Static files" item 4). Concurrent malicious modification during startup is **not** prevented.
+  - The configured UI path, up to and including the root folder, is resolved once with `realpath` and treated as operator configuration; symlinks are rejected only below it.
+  - On Windows (no POSIX uids), ownership and mode checks are skipped and `O_NOFOLLOW` may be unavailable. Not tested on Windows.
+- **Roles** outside the demo allowlist always show as `assigned role`, even harmless ones; other games need their positions added deliberately.
+- **Purging:** expired credentials are deleted lazily (when used, or when a pairing is created); until then they are unusable but held in memory.
+- **Voice ownership:** at most one stale record per session can briefly exist (the engine allows one live request per session) until the next live-state update, status call, new explanation or grace timer prunes it.

@@ -2,7 +2,7 @@
 import type {
   ObservationSource,
   RecommendationStatus,
-  SessionEvent,
+  BrowserSessionEvent,
   SessionStatus,
   StaleReason,
   VoiceRequestStatus,
@@ -58,7 +58,7 @@ export const VOICE_REQUEST_LABEL: Record<VoiceRequestStatus, string> = {
   cancelled: 'Explanation stopped',
 };
 
-const EVENT_LABEL: Record<SessionEvent['type'], string> = {
+const EVENT_LABEL: Record<BrowserSessionEvent['type'], string> = {
   session_started: 'Session started',
   session_ended: 'Session ended',
   session_paused: 'Paused',
@@ -79,7 +79,7 @@ const EVENT_LABEL: Record<SessionEvent['type'], string> = {
 };
 
 /** Timeline label. `voice_finished` carries its real outcome (finished / stopped / failed). */
-export function eventLabel(event: SessionEvent): string {
+export function eventLabel(event: BrowserSessionEvent): string {
   if (event.type === 'voice_finished') {
     if (event.outcome === 'cancelled') return event.cancelReason === 'user' ? 'Voice stopped' : 'Voice cancelled';
     if (event.outcome === 'failed') return 'Voice failed';

@@ -1,6 +1,6 @@
 /**
  * End-of-session review built ONLY from shared data the backend already provides:
- * the engine timeline (`getTimeline`, typed `SessionEvent`s) and the final
+ * the browser timeline (`getTimeline`, typed `BrowserSessionEvent`s, no goal or decision wording) and the final
  * `OverlayState` (card titles and advice). Deterministic rules, no model.
  *
  * INTERIM: engineering.md §1 assigns review generation to a backend "review
@@ -9,13 +9,14 @@
  * touching components. It never invents scores, outcomes, confidence values or
  * player assessments, and says when there is not enough evidence (design.md §8).
  */
-import type { SessionReview, SessionTimeline } from '../contracts/pending';
-import type { OverlayState, SessionEvent } from '../contracts/shared';
+import type { SessionReview } from '../contracts/pending';
+import type { BrowserSessionTimeline as SessionTimeline } from '../contracts/shared';
+import type { OverlayState, BrowserSessionEvent } from '../contracts/shared';
 import { allCards } from '../session/selectors';
 
 export const NOT_ENOUGH_EVIDENCE = 'Not enough observations for a performance assessment.';
 
-const KEY_MOMENT_TYPES = new Set<SessionEvent['type']>([
+const KEY_MOMENT_TYPES = new Set<BrowserSessionEvent['type']>([
   'role_updated',
   'goal_set',
   'decision_recorded',
@@ -42,8 +43,8 @@ export function buildReview(timeline: SessionTimeline, state: OverlayState | nul
     .filter((e) => KEY_MOMENT_TYPES.has(e.type))
     .map((e) => ({ eventIds: [e.id], time: e.time, whatHappened: e.summary }));
 
-  const created = events.filter((e): e is Extract<SessionEvent, { type: 'recommendation_created' }> => e.type === 'recommendation_created');
-  const resolved = events.filter((e): e is Extract<SessionEvent, { type: 'recommendation_resolved' }> => e.type === 'recommendation_resolved');
+  const created = events.filter((e): e is Extract<BrowserSessionEvent, { type: 'recommendation_created' }> => e.type === 'recommendation_created');
+  const resolved = events.filter((e): e is Extract<BrowserSessionEvent, { type: 'recommendation_resolved' }> => e.type === 'recommendation_resolved');
   const screenObservations = events.filter((e) => e.type === 'observation' && e.source === 'screen');
   const enoughEvidence = created.length > 0 && screenObservations.length > 0;
   const activity = state?.activity ?? 'unconfirmed';

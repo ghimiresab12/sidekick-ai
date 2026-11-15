@@ -19,23 +19,29 @@
  * - At most one reasoning run per session; triggers during a run coalesce into one rerun.
  */
 import type {
+  Activity,
   ConversationInput,
   ConversationObservation,
+  ExplanationRequest,
+  Participant,
+  Recommendation,
   Result,
+  VoiceRequest,
   ScreenInput,
   ScreenObservation,
   SessionSnapshot,
 } from '../contracts/types.js';
 import { SidekickEngine, type EngineOptions } from '../engine.js';
 import { parseIsoTime } from '../contracts/validate.js';
-import type {
-  CoordinatorDiagnostic,
-  CoordinatorResult,
-  FrameInput,
-  ReasoningContextProposal,
-  ReasoningFn,
-  ReasoningRequest,
-  VisionPort,
+import {
+  MAX_PARTICIPANTS,
+  type CoordinatorDiagnostic,
+  type CoordinatorResult,
+  type FrameInput,
+  type ReasoningContextProposal,
+  type ReasoningFn,
+  type ReasoningRequest,
+  type VisionPort,
 } from './ports.js';
 import {
   DEFAULT_SELECTION_LIMITS,
@@ -98,6 +104,31 @@ const iso = (ms: number): string => new Date(ms).toISOString();
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
 const newPeriod = (): Period => ({ controller: new AbortController() });
+
+/**
+ * Invisible characters removed from participant names: every Unicode format character
+ * (Cf: soft hyphen, zero-width space/joiners, bidi controls, word joiner, BOM, …), control
+ * characters (Cc), variation selectors, and the blank "filler" letters that render as
+ * nothing (Hangul fillers, braille blank, combining grapheme joiner).
+ */
+const INVISIBLE = /[\p{Cf}\p{Cc}\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u034F\u115F\u1160\u3164\uFFA0\u2800]/gu;
+
+/**
+ * The ONE normalization policy for participant names, applied to the stored display
+ * name: NFKC (compatibility forms such as full-width letters), invisible characters
+ * removed, every kind of whitespace collapsed to one space, trimmed. Letters, marks and
+ * digits of every script are preserved. Returns '' when nothing visible remains.
+ */
+export function normalizeDisplayName(name: string): string {
+  const cleaned = name.normalize('NFKC').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim().normalize('NFC');
+  // A name must contain at least one visible letter, digit or symbol (not only marks/punctuation).
+  return /[\p{L}\p{N}\p{S}]/u.test(cleaned) ? cleaned : '';
+}
+
+/** Comparison key: the normalized name, Unicode case-folded via upper→lower (so "ß" matches "SS"). */
+export function participantNameKey(name: string): string {
+  return normalizeDisplayName(name).toUpperCase().toLowerCase();
+}
 
 /** Reads a known adapter error code from a thrown value (structural; no adapter import). */
 function visionErrorCode(error: unknown): 'invalid_frame' | 'busy' | 'timeout' | undefined {
@@ -208,6 +239,62 @@ export class SidekickCoordinator {
       this.#abortPeriod(t, t.period);
     }
     return this.engine.discard(sessionId);
+  }
+
+  // ── Context and UI commands (single write path for the bridge) ────────────
+
+  /**
+   * Registers a participant. Enforces reasoning's limit of 20 (more would make every
+   * reasoning call fail) and rejects duplicate names (they make roles ambiguous), using
+   * Unicode NFKC normalization, invisible-character removal, whitespace collapsing and
+   * case folding. The stored name is the normalized one (`normalizeDisplayName`); a name
+   * with no visible characters is refused (`invalid_participant_name`). Re-runs reasoning
+   * so existing, still-valid evidence can use the name. Rejected requests change nothing
+   * and never trigger reasoning.
+   */
+  addParticipant(sessionId: string, input: { displayName: string; externalRef?: string }): CoordinatorResult<Participant> {
+    const snap = this.engine.getSession(sessionId);
+    if (!snap.ok) return snap;
+    if (snap.value.participants.length >= MAX_PARTICIPANTS) {
+      return { ok: false, error: 'participant_limit_reached', detail: `at most ${MAX_PARTICIPANTS} participants` };
+    }
+    if (typeof input?.displayName !== 'string') return { ok: false, error: 'invalid_input', detail: 'displayName must be a string' };
+    const displayName = normalizeDisplayName(input.displayName);
+    if (displayName === '') return { ok: false, error: 'invalid_participant_name', detail: 'name has no visible characters' };
+    const key = participantNameKey(displayName);
+    if (snap.value.participants.some((p) => participantNameKey(p.displayName) === key)) {
+      return { ok: false, error: 'duplicate_participant' };
+    }
+    const r = this.engine.addParticipant(sessionId, { ...input, displayName });
+    if (r.ok) this.#trigger(sessionId);
+    return r;
+  }
+
+  /** A participant/operator confirmed the activity. Re-runs reasoning over existing, still-valid evidence. */
+  confirmActivity(sessionId: string, activity: Activity): Result<SessionSnapshot> {
+    const r = this.engine.confirmActivity(sessionId, activity);
+    if (r.ok) this.#trigger(sessionId);
+    return r;
+  }
+
+  dismiss(sessionId: string, recommendationId: string): Result<Recommendation> {
+    return this.engine.dismiss(sessionId, recommendationId);
+  }
+
+  requestExplanation(
+    sessionId: string,
+    recommendationId: string,
+    options?: { requesterParticipantId?: string },
+  ): Result<ExplanationRequest> {
+    return this.engine.requestExplanation(sessionId, recommendationId, options);
+  }
+
+  reportVoiceStatus(sessionId: string, requestId: string, status: 'playing_locally' | 'finished' | 'failed'): Result<VoiceRequest> {
+    return this.engine.reportVoiceStatus(sessionId, requestId, status);
+  }
+
+  cancelExplanation(sessionId: string, requestId: string, reason: 'user' | 'client_disconnected'): Result<VoiceRequest> {
+    return this.engine.cancelExplanation(sessionId, requestId, reason);
   }
 
   // ── Capture input ─────────────────────────────────────────────────────────

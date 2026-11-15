@@ -322,6 +322,43 @@ export interface ExplanationContext {
   conditionAgeMs: number;
 }
 
+/**
+ * Grounded explanation text returned to the requesting UI for LOCAL speech synthesis
+ * (never audio, never `ExplanationContext`, which carries raw transcript text).
+ * `request.id` is the only handle for playback reports and cancellation.
+ */
+export interface ExplanationScript {
+  request: VoiceRequest;
+  text: string;
+  /** True when the card was stale or its evidence old: must not be read as a live alert. */
+  refersToEarlierObservation: boolean;
+}
+
+/** `getTimeline()` plus the snapshot flag a review needs to state gaps honestly. INTERNAL (full text). */
+export interface SessionTimeline {
+  events: SessionEvent[];
+  truncated: boolean;
+}
+
+// ── Browser-visible projections (milestone 4, M5) ───────────────────────────
+// What a paired browser may see. Transcript-derived free text (goal and decision
+// wording, unsafe role text) is NEVER included; see src/privacy/browser-projection.ts.
+
+/** A decision as browsers see it: provenance and links only, no wording. */
+export type BrowserDecision = Omit<GroupDecision, 'text'>;
+
+/** A timeline event as browsers see it. Summaries are rebuilt server-side from structured fields. */
+export type BrowserSessionEvent =
+  | Exclude<SessionEvent, { type: 'goal_set' } | { type: 'decision_recorded' }>
+  | Omit<Extract<SessionEvent, { type: 'goal_set' }>, 'text'>
+  | (Omit<Extract<SessionEvent, { type: 'decision_recorded' }>, 'decision'> & { decision: BrowserDecision });
+
+/** `GET /v1/sessions/:id/timeline` response body (plus `ok`). */
+export interface BrowserSessionTimeline {
+  events: BrowserSessionEvent[];
+  truncated: boolean;
+}
+
 export interface ExplanationRequest {
   request: VoiceRequest;
   context: ExplanationContext;

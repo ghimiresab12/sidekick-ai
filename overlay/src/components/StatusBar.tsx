@@ -8,6 +8,7 @@ interface Props {
   syntheticInput: boolean;
   pending: PendingAction | null;
   allowed: (cmd: SessionCommand) => boolean;
+  operatorResumes: boolean;
   onPause: () => void;
   onResume: () => void;
   onRequestEnd: () => void;
@@ -30,7 +31,7 @@ const SYNTHETIC_NOTE: Record<SessionStatus, string> = {
   ended: 'Observation stopped',
 };
 
-export function StatusBar({ overlay, syntheticInput, pending, allowed, onPause, onResume, onRequestEnd }: Props) {
+export function StatusBar({ overlay, syntheticInput, pending, allowed, operatorResumes, onPause, onResume, onRequestEnd }: Props) {
   const { status } = overlay;
   const busy = pending !== null;
   const activity = overlay.activityConfirmed
@@ -56,7 +57,8 @@ export function StatusBar({ overlay, syntheticInput, pending, allowed, onPause, 
             {pending === 'pause' ? 'Pausing…' : '❚❚ Pause'}
           </button>
         )}
-        {status === 'paused' && (
+        {status === 'paused' && operatorResumes && <span className="muted small">Paused — the operator resumes</span>}
+        {status === 'paused' && !operatorResumes && (
           <button type="button" className="btn btn-primary" onClick={onResume} disabled={busy || !allowed('resume')}>
             {pending === 'resume' ? 'Resuming…' : '▶ Resume'}
           </button>

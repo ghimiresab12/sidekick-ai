@@ -1,4 +1,5 @@
-import type { SessionReview as Review, SessionTimeline } from '../contracts/pending';
+import type { SessionReview as Review } from '../contracts/pending';
+import type { BrowserSessionTimeline as SessionTimeline } from '../contracts/shared';
 import type { OverlayState } from '../contracts/shared';
 import { allCards } from '../session/selectors';
 import { capitalize, eventLabel, formatClock, REC_STATUS_LABEL, VOICE_REQUEST_LABEL } from '../ui/format';
