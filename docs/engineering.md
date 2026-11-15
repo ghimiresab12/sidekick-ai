@@ -758,3 +758,43 @@ All of these are server-only.
 - **Roles** outside the demo allowlist always show as `assigned role`, even harmless ones; other games need their positions added deliberately.
 - **Purging:** expired credentials are deleted lazily (when used, or when a pairing is created); until then they are unusable but held in memory.
 - **Voice ownership:** at most one stale record per session can briefly exist (the engine allows one live request per session) until the next live-state update, status call, new explanation or grace timer prunes it.
+
+### Python final-transcript forwarding infrastructure
+
+`agent/src/transcript_forwarder.py` provides a bounded, SDK-independent queue around
+BridgeClient. It does not configure LiveKit or change `agent.py`; Damius owns that
+integration. Start BridgeClient for `ctx.room.name`, then call `forwarder.start()`
+on the running event loop. The synchronous final-STT callback calls
+`forwarder.submit_final(event.transcript, is_final=event.is_final)`. This captures
+one exact BridgeClient context immediately, before queuing. The worker never
+refreshes that context, retries a send, or logs content. `True` means queued, not
+accepted by Node. Queue overflow drops the newest item. The default limit is 16
+pending items plus one in-flight item, each at most 1,000 characters.
+
+BridgeClient remains the consent and session authority. No context is issued
+before operator consent; sends recheck current authorization. Old active-generation
+transcripts within the same session retain their original metadata; replacement
+sessions cannot receive old contexts. Call `clear_pending()` on pause/end or
+session replacement to release queued content. It does not undo an in-flight POST.
+A failed or cancelled transmitted request may already be accepted: never retry it.
+`last_result` retains only the latest content-free SendResult; an unexpected send
+exception increments `failed_count` without retaining or logging exception text.
+
+The adapter must ALSO gate audio entering STT using fresh capture state, reset the
+STT stream across pause/resume and session replacement, and reject late finals from
+the old stream. This helper cannot determine which audio produced a final event.
+Keep room transcription publication and recording disabled, retain the single
+Chert connection greeting, and disable ongoing conversational replies. These
+LiveKit changes and real-call verification remain pending in Damius's entrypoint.
+
+On job shutdown, remove the callback and stop STT input first, then await
+`forwarder.close()`, then `bridge.close()` in a shutdown hook (also clean up failed
+initialization). Close drops pending items and cancels/awaits the tracked worker;
+it does not own or close BridgeClient. `wait_idle()` is for tests or an intentional
+bounded drain, not for a live shutdown that must stop capture immediately.
+
+Run both host processes on the same machine using
+`SIDEKICK_BRIDGE_URL=http://127.0.0.1:8787`. Node holds distinct control and agent
+tokens; Python receives only the agent token and must not inherit
+`SIDEKICK_CONTROL_TOKEN`. Use mock Node reasoning and `SIDEKICK_VISION=none` for
+local verification. Direct aiohttp is required; no fallback client is introduced.
