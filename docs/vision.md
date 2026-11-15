@@ -82,8 +82,10 @@ const coordinator = new SidekickCoordinator({
 ```
 
 The adapter accepts PNG/JPEG/WebP bytes, validates MIME signatures and a maximum
-5 MiB budget, and snapshots encoded bytes before awaiting network I/O. Signature
-checks are not a full decoder; malformed image data can still be rejected by
+5 MiB budget, and snapshots encoded bytes before awaiting network I/O. Frames also
+carry an explicit `mediaSource`: `screen_share` is eligible for this soccer prompt;
+`camera` returns unknown/unsupported evidence locally and is never sent to Gemini
+by this profile. Signature checks are not a full decoder; malformed image data can still be rejected by
 Gemini. The coordinator preserves capture-time generation and timestamp and gates
 consent/lifecycle before calling it. Do not call vision directly on private frames
 without that lifecycle gate.

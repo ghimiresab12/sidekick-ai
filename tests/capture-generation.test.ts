@@ -32,13 +32,13 @@ test('[R2-3] pre-pause capture with a clock skewed to look post-resume cannot be
   // Captured at ~t=20.9 (before the pause) by a producer whose clock runs exactly +5s ahead.
   // Old timestamp-floor logic accepted this (25.9 ≥ resume at 23). Processed after resume:
   const skewed = value(engine.ingestScreen(sid, {
-    captureGeneration: beforePause, observedAt: at(25.9), summary: 'Left zone empty', evidenceQuality: 'clear',
+    mediaSource: 'screen_share', captureGeneration: beforePause, observedAt: at(25.9), summary: 'Left zone empty', evidenceQuality: 'clear',
   }));
   assert.equal(skewed.captureGeneration, beforePause, 'stored with its real capture generation');
   assert.equal(error(propose(engine, sid)(candidate([skewed.id]))), 'stale_evidence');
   // Exactly at the admission boundary (now + maxClockSkewMs) behaves the same:
   const boundary = value(engine.ingestScreen(sid, {
-    captureGeneration: beforePause, observedAt: at(29), summary: 'Left zone empty', evidenceQuality: 'clear',
+    mediaSource: 'screen_share', captureGeneration: beforePause, observedAt: at(29), summary: 'Left zone empty', evidenceQuality: 'clear',
   }));
   assert.equal(error(propose(engine, sid)(candidate([boundary.id]))), 'stale_evidence');
   assert.equal(value(engine.getSession(sid)).recommendations.length, 0);
@@ -49,7 +49,7 @@ test('[R2-3] post-resume capture with a lagging clock is still valid condition e
   clock.set(24);
   // Captured after resume, but the producer clock is 3s behind → timestamp falls inside the pause.
   const lagging = value(engine.ingestScreen(sid, {
-    captureGeneration: afterResume, observedAt: at(21.5), summary: 'Left zone empty', evidenceQuality: 'clear',
+    mediaSource: 'screen_share', captureGeneration: afterResume, observedAt: at(21.5), summary: 'Left zone empty', evidenceQuality: 'clear',
   }));
   assert.equal(value(propose(engine, sid)(candidate([lagging.id]))).outcome, 'created');
 });
@@ -59,7 +59,7 @@ test('[R2-3] input captured while paused is rejected regardless of timestamp', (
   clock.set(24);
   for (const t of [22, 24]) {
     assert.equal(
-      error(engine.ingestScreen(sid, { captureGeneration: duringPause, observedAt: at(t), summary: 's', evidenceQuality: 'clear' })),
+      error(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: duringPause, observedAt: at(t), summary: 's', evidenceQuality: 'clear' })),
       'invalid_generation',
     );
     assert.equal(
@@ -74,7 +74,7 @@ test('[R2-3] unknown, future and malformed generations are rejected', () => {
   clock.set(24);
   for (const g of [afterResume + 1, 0, -1, 1.5, '3', null, undefined]) {
     assert.equal(
-      error(engine.ingestScreen(sid, { captureGeneration: g as never, observedAt: at(24), summary: 's', evidenceQuality: 'clear' })),
+      error(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: g as never, observedAt: at(24), summary: 's', evidenceQuality: 'clear' })),
       'invalid_generation',
       `generation ${String(g)}`,
     );
@@ -89,7 +89,7 @@ test('[R2-3] earlier-generation observations remain usable as context and role p
     value(engine.assignRole(sid, alex.id, 'left defense', { source: 'transcript', sourceObservationId: talk.id })).outcome,
     'applied',
   );
-  const frame = value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid), observedAt: at(24), summary: 'gap', evidenceQuality: 'clear' }));
+  const frame = value(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid), observedAt: at(24), summary: 'gap', evidenceQuality: 'clear' }));
   const r = value(propose(engine, sid)(candidate([frame.id], { contextObservationIds: [talk.id] })));
   assert.equal(r.outcome, 'created');
 });

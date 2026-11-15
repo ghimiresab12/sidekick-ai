@@ -548,6 +548,7 @@ export class SidekickEngine {
         sessionId: s.id,
         captureGeneration: input.captureGeneration,
         source: 'screen',
+        mediaSource: input.mediaSource,
         observedAt: iso(timing.value),
         receivedAt: this.#nowIso(),
         summary: input.summary.trim(),
@@ -559,7 +560,7 @@ export class SidekickEngine {
         s,
         observation,
         timing.value,
-        `Screen (${observation.evidenceQuality}): ${truncate(observation.summary, 120)}`,
+        `${observation.mediaSource === 'camera' ? 'Camera' : 'Screen share'} (${observation.evidenceQuality}): ${truncate(observation.summary, 120)}`,
       );
       return ok(clone(observation));
     });
@@ -637,6 +638,9 @@ export class SidekickEngine {
       for (const id of conditionIds) {
         const stored = s.observations.get(id);
         if (!stored) return err('evidence_not_found', `observation ${id} is not in this session`);
+        if (stored.observation.source === 'screen' && stored.observation.mediaSource !== 'screen_share') {
+          return err('insufficient_evidence', `observation ${id} is not from a shared screen`);
+        }
         if (stored.observation.source === 'screen' && stored.observation.evidenceQuality === 'unknown') {
           return err('insufficient_evidence', `observation ${id} has unknown evidence quality`);
         }
@@ -1347,7 +1351,7 @@ export class SidekickEngine {
     const evidenceOf = (ids: string[], kind: 'condition' | 'context') =>
       ids.flatMap((id) => {
         const o = s.observations.get(id)?.observation;
-        return o ? [{ observationId: o.id, kind, source: o.source, observedAt: o.observedAt }] : [];
+      return o ? [{ observationId: o.id, kind, source: o.source, ...(o.source === 'screen' ? { mediaSource: o.mediaSource } : {}), observedAt: o.observedAt }] : [];
       });
     const view: RecommendationView = {
       id: rec.id,

@@ -93,6 +93,7 @@ export function runDemoScenario(): DemoResult {
   clock.set(10);
   unwrap(
     engine.ingestScreen(sid, {
+      mediaSource: 'screen_share',
       captureGeneration: generation(),
       observedAt: at(9),
       summary: 'Blue defender near left defensive zone',
@@ -105,6 +106,7 @@ export function runDemoScenario(): DemoResult {
   clock.set(20);
   const gap1 = unwrap(
     engine.ingestScreen(sid, {
+      mediaSource: 'screen_share',
       captureGeneration: generation(),
       observedAt: at(19),
       summary: 'Blue defender advanced past midfield; left defensive zone empty',
@@ -129,6 +131,7 @@ export function runDemoScenario(): DemoResult {
   clock.set(24);
   const gap2 = unwrap(
     engine.ingestScreen(sid, {
+      mediaSource: 'screen_share',
       captureGeneration: generation(),
       observedAt: at(23),
       summary: 'Left defensive zone still empty',
@@ -151,6 +154,7 @@ export function runDemoScenario(): DemoResult {
   clock.set(36);
   const covered = unwrap(
     engine.ingestScreen(sid, {
+      mediaSource: 'screen_share',
       captureGeneration: generation(),
       observedAt: at(35),
       summary: 'Blue defender back in left defensive zone',

@@ -45,6 +45,7 @@ export interface ConversationObservation extends ObservationBase {
 }
 export interface ScreenObservation extends ObservationBase {
   source: 'screen';
+  mediaSource: 'camera' | 'screen_share';
   summary: string;
   evidenceQuality: 'clear' | 'partial' | 'unknown';
   facts?: Record<string, string | number | boolean>;

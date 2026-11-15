@@ -158,6 +158,8 @@ export interface ConversationObservation extends ObservationBase {
 
 export interface ScreenObservation extends ObservationBase {
   source: 'screen';
+  /** Origin of the visual sample; independent of the normalized observation kind. */
+  mediaSource: 'camera' | 'screen_share';
   /** Structured description of a sampled frame — never raw pixels. */
   summary: string;
   evidenceQuality: EvidenceQuality;
@@ -191,6 +193,8 @@ export interface ConversationInput {
 
 /** What the model adapter sends after interpreting a sampled frame. */
 export interface ScreenInput {
+  /** Origin of the raw sample, set by the capture adapter; never inferred from pixels. */
+  mediaSource: 'camera' | 'screen_share';
   /** The generation read when the frame was captured — not when the model finished. */
   captureGeneration: CaptureGeneration;
   observedAt: IsoTime;
@@ -500,6 +504,7 @@ export interface RecommendationView {
     observationId: string;
     kind: 'condition' | 'context';
     source: ObservationSource;
+    mediaSource?: 'camera' | 'screen_share';
     observedAt: IsoTime;
   }>;
   /** Participants and roles as they were when the card was created. */

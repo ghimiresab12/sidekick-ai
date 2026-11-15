@@ -146,6 +146,7 @@ function sameFacts(a: ScreenObservation, b: ScreenObservation): boolean {
  * summaries differ. Anything else counts as potentially superseding.
  */
 export function framesEquivalent(a: ScreenObservation, b: ScreenObservation, conditionFactKeys: readonly string[]): boolean {
+  if (a.mediaSource !== b.mediaSource) return false;
   if (a.evidenceQuality !== 'clear' || b.evidenceQuality !== 'clear') return false;
   if (normalizedSummary(a) === normalizedSummary(b) && sameFacts(a, b)) return true;
   if (conditionFactKeys.length === 0 || !a.facts || !b.facts) return false;

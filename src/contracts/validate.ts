@@ -180,6 +180,9 @@ export function checkScreenInput(input: unknown): Check {
   if (!isObject(input)) return fail('invalid_input', 'screen input must be an object');
   const frameRef = input.frameRef;
   return firstFailure(
+    input.mediaSource === 'camera' || input.mediaSource === 'screen_share'
+      ? OK
+      : fail('invalid_input', 'mediaSource must be camera | screen_share'),
     checkGeneration(input.captureGeneration),
     checkTimestamp('observedAt', input.observedAt),
     checkString('summary', input.summary, LIMITS.screenSummary),

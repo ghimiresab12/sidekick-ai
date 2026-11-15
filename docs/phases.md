@@ -106,11 +106,11 @@ The team-supplied HackUTA slides describe a Saturday 12 PM–midnight hacking wi
 
 The requirements update adds camera-context coaching and an opt-in Chert realtime voice conversation, with quiet text coaching as the default. It supersedes the older private-only voice target as the primary voice interaction. Do not skip the live integration proof or implement guessed Chert methods.
 
-**Current phase for this branch: Phase 0 — product and interface reset.** This phase updates the requirements, engineering boundary, overlay interaction rules and roadmap to reflect the agreed behavior. It is complete only when the team reviews those contracts.
+**Phase 0 — product and interface reset: complete on this branch** (requirements, engineering boundary, overlay interaction rules and roadmap; commit `b37fabe`).
 
-**Next phase after review: media-source contract.** Extend the internal frame path to carry an explicit source (`camera` or `screen_share`), validate it, and preserve it into evidence. Keep the existing soccer-only profile explicitly screen-only. Add focused contract checks. No Chert method or event field may be assumed.
+**Phase 1 — media-source contract: complete on this branch.** Internal frames now carry an explicit `camera` or `screen_share` source through bridge validation, vision interpretation, engine observations, reasoning input and recommendation evidence. The soccer profile remains screen-share-only; camera frames are not sent to Gemini and cannot be used as soccer condition evidence. Focused tests cover these boundaries. No Chert method or event field was assumed.
 
-**Following phase: verified Chert wiring.** Inspect starter examples and live session payloads; implement camera frames, shared-screen frames, text/audio input and agent audio output only where actually exposed. The current `line_unacknowledged` worker state blocks live-call verification, so any local output during that block must be labeled mocked and the live voice control must remain unavailable.
+**Next phase after review: verified Chert wiring.** Inspect starter examples and live session payloads; implement camera frames, shared-screen frames, text/audio input and agent audio output only where actually exposed. Latest `chert doctor --json` check (2026-11-15) reports the assigned line and worker available, resolving the earlier unacknowledged/offline warning. The agent check was skipped, media readiness remains unverified, and `OPENAI_API_KEY` is missing; verify those before attempting a live agent call.
 
 **Then:** add general screen/camera model instructions and text Q&A; implement the opt-in voice control against verified Chert realtime audio; test lifecycle stop/interruption; preserve session review. The existing private card explanation can remain separate if desired. Each phase is reviewed before moving to the next.
 

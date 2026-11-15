@@ -101,7 +101,7 @@ export async function startDemoBridge(options = {}) {
       scene = nextScene;
       const r = await agent('POST', `/v1/sessions/${sessionId}/frames`, {
         body: scenePng(nextScene),
-        headers: { 'content-type': 'image/png', 'x-capture-generation': String(await generation()), 'x-observed-at': new Date().toISOString() },
+        headers: { 'content-type': 'image/png', 'x-media-source': 'screen_share', 'x-capture-generation': String(await generation()), 'x-observed-at': new Date().toISOString() },
       });
       await runtime.coordinator.whenIdle(sessionId);
       return r;

@@ -51,7 +51,7 @@ export function propose(engine: SidekickEngine, sid: string) {
 export function screen(engine: SidekickEngine, sid: string, seconds: number, covered = false) {
   return value(
     engine.ingestScreen(sid, {
-      captureGeneration: gen(engine, sid),
+      mediaSource: 'screen_share', captureGeneration: gen(engine, sid),
       observedAt: at(seconds),
       summary: covered ? 'Left zone covered' : 'Left zone empty',
       evidenceQuality: 'clear',

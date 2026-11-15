@@ -14,7 +14,7 @@ function setup(vision: VisionPort) {
   const started = c.startWithConsent(created.value.id);
   assert.ok(started.ok);
   const frame: FrameInput = {
-    captureGeneration: started.value.captureGeneration, observedAt: new Date(nowMs).toISOString(),
+    mediaSource: 'screen_share', captureGeneration: started.value.captureGeneration, observedAt: new Date(nowMs).toISOString(),
     image: new Uint8Array([1, 2, 3]), mimeType: 'image/png',
   };
   return { c, sid: created.value.id, frame };

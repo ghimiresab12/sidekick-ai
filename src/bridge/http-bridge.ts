@@ -378,6 +378,10 @@ export function createBridge(options: BridgeOptions): Bridge {
     if (typeof observedAt !== 'string' || observedAt.length === 0 || observedAt.length > 64) {
       return reject(ctx.res, 400, 'invalid_timestamp');
     }
+    const mediaSource = ctx.req.headers['x-media-source'];
+    if (mediaSource !== 'camera' && mediaSource !== 'screen_share') {
+      return reject(ctx.res, 400, 'invalid_media_source');
+    }
     const captureGeneration = Number(generationHeader);
     const mimeType = mediaType(ctx.req.headers['content-type']) as FrameInput['mimeType'];
     if (!precheckBody(ctx, (t) => FRAME_TYPES.has(t), maxFrameBytes)) return;
@@ -402,7 +406,7 @@ export function createBridge(options: BridgeOptions): Bridge {
       if (body.body.length === 0) return fail(ctx.res, 'invalid_input');
       const r = await coordinator.ingestFrame(
         ctx.sessionId!,
-        { captureGeneration, observedAt, image: new Uint8Array(body.body.buffer, body.body.byteOffset, body.body.byteLength), mimeType },
+        { mediaSource, captureGeneration, observedAt, image: new Uint8Array(body.body.buffer, body.body.byteOffset, body.body.byteLength), mimeType },
         { signal: cancel.signal },
       );
       if (timedOut()) return send(ctx.res, 504, { ok: false, error: 'vision_timeout' });

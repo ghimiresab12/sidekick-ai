@@ -56,6 +56,8 @@ export type ReasoningFn = (request: ReasoningRequest, signal: AbortSignal) => Pr
 
 /** A sampled frame handed over by the capture adapter. Held in memory only, never stored. */
 export interface FrameInput {
+  /** Verified capture path, assigned by the adapter rather than inferred from pixels. */
+  mediaSource: 'camera' | 'screen_share';
   /** Generation read when the frame was CAPTURED. Preserved through vision into the engine. */
   captureGeneration: CaptureGeneration;
   /** Source time of the frame. */
@@ -64,7 +66,7 @@ export interface FrameInput {
   mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
 }
 
-/** Structured description of one frame — becomes `ScreenInput` (minus generation/time). */
+/** Structured description of one frame — becomes `ScreenInput` (minus capture metadata). */
 export interface ScreenDescription {
   summary: string;
   evidenceQuality: EvidenceQuality;

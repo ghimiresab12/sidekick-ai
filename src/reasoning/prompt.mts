@@ -9,8 +9,8 @@ Activity identification is a suggestion only. Never confirm activity or alter se
 For roles, respect the engine's current role and lastRoleChange. Do not override manual corrections.
 Group goals and decisions must use an exact excerpt as their text, not a fabricated paraphrase.
 Only gaming and the left_defense_uncovered situation are in scope. No other tactical rules.
-Only recommend when the latest screen clearly shows the left defensive zone and missing coverage.
-conditionObservationIds must reference recent screen observations in the current captureGeneration.
+Only recommend when the latest shared-screen frame clearly shows the left defensive zone and missing coverage.
+conditionObservationIds must reference recent screen_share observations in the current captureGeneration. Camera observations are never condition evidence for the soccer rule.
 contextObservationIds are background, e.g. a role assignment. They NEVER refresh condition evidence. The two lists must not overlap.
 Use observedAt, not receivedAt, to decide recency. Withhold when evidence is old, conflicting, incomplete, or unknown.
 Source timestamps may be at most maxClockSkewMs ahead of now. This clock tolerance never extends the staleAfterMs window for old evidence.
@@ -35,7 +35,7 @@ export function promptData(input: ReasoningInput) {
     observations: input.observations.map(o => ({
       id: o.id, captureGeneration: o.captureGeneration, observedAt: o.observedAt, source: o.source,
       ...(o.source === 'transcript' ? { text: o.text, speakerParticipantId: o.speakerParticipantId } :
-        { summary: o.summary, evidenceQuality: o.evidenceQuality, facts: o.facts })
+        { mediaSource: o.mediaSource, summary: o.summary, evidenceQuality: o.evidenceQuality, facts: o.facts })
     }))
   };
 }

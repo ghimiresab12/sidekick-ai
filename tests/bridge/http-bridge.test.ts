@@ -142,11 +142,11 @@ async function start(options: Options = {}) {
     return id;
   }
 
-  const frame = (id: string, generation: number | string, observedAt: string, body: Uint8Array = new Uint8Array([1, 2, 3]), type = 'image/jpeg') =>
+  const frame = (id: string, generation: number | string, observedAt: string, body: Uint8Array = new Uint8Array([1, 2, 3]), type = 'image/jpeg', mediaSource = 'screen_share') =>
     api('POST', `/v1/sessions/${id}/frames`, {
       token: AGENT,
       body,
-      headers: { 'content-type': type, 'x-capture-generation': String(generation), 'x-observed-at': observedAt },
+      headers: { 'content-type': type, 'x-media-source': mediaSource, 'x-capture-generation': String(generation), 'x-observed-at': observedAt },
     });
   const transcript = (id: string, json: unknown) => api('POST', `/v1/sessions/${id}/transcripts`, { token: AGENT, json });
   const capture = async (id: string) => (await api('GET', `/v1/sessions/${id}/capture`, { token: AGENT })).body!;
@@ -252,7 +252,7 @@ test('missing or wrong tokens are rejected with 401 before the body is processed
   // body for real races the server's early close and can surface as a client ECONNRESET.)
   const big = await h.raw({
     method: 'POST', path: `/v1/sessions/${id}/frames`,
-    headers: { 'content-type': 'image/jpeg', 'content-length': String(1024 * 1024), 'x-capture-generation': '1', 'x-observed-at': at(1) },
+    headers: { 'content-type': 'image/jpeg', 'content-length': String(1024 * 1024), 'x-media-source': 'screen_share', 'x-capture-generation': '1', 'x-observed-at': at(1) },
     end: false,
   });
   assert.ok(big !== 'destroyed');
@@ -266,7 +266,7 @@ test('each token is limited to its role (agent cannot grant consent; control can
   // Milestone 4: the trusted control token may create sessions (operator-led demos).
   assert.equal((await h.api('POST', '/v1/sessions', { token: CONTROL, json: { externalRef: 'x' } })).status, 201);
   const forbidden = [
-    await h.api('POST', `/v1/sessions/${id}/frames`, { token: CONTROL, body: new Uint8Array([1]), headers: { 'content-type': 'image/png', 'x-capture-generation': '1', 'x-observed-at': at(1) } }),
+    await h.api('POST', `/v1/sessions/${id}/frames`, { token: CONTROL, body: new Uint8Array([1]), headers: { 'content-type': 'image/png', 'x-media-source': 'screen_share', 'x-capture-generation': '1', 'x-observed-at': at(1) } }),
     await h.api('POST', `/v1/sessions/${id}/pairings`, { token: AGENT, json: {} }),
     await h.api('POST', `/v1/sessions/${id}/consent`, { token: AGENT, json: { consent: true, allParticipantsAgreed: true } }),
     await h.api('POST', `/v1/sessions/${id}/pause`, { token: AGENT }),
@@ -361,7 +361,28 @@ test('malformed frames are rejected with zero vision calls', () => withBridge({ 
   }
   const noMeta = await h.api('POST', `/v1/sessions/${id}/frames`, { token: AGENT, body: new Uint8Array([1]), headers: { 'content-type': 'image/png' } });
   assert.deepEqual([noMeta.status, noMeta.body!.error], [400, 'invalid_generation']);
+  const noSource = await h.api('POST', `/v1/sessions/${id}/frames`, { token: AGENT, body: new Uint8Array([1]), headers: { 'content-type': 'image/png', 'x-capture-generation': '1', 'x-observed-at': at(9) } });
+  assert.deepEqual([noSource.status, noSource.body!.error], [400, 'invalid_media_source']);
+  const badSource = await h.frame(id, 1, at(9), undefined, 'image/png', 'video');
+  assert.deepEqual([badSource.status, badSource.body!.error], [400, 'invalid_media_source']);
   assert.equal(h.seen.length, 0);
+}));
+
+test('camera frame source is preserved and cannot create the screen-share soccer recommendation', () => withBridge({}, async (h) => {
+  const id = await h.activeSession();
+  h.clock.set(10);
+  const result = await h.frame(id, 1, at(9), undefined, 'image/png', 'camera');
+  assert.equal(result.status, 200);
+  await h.coordinator.whenIdle(id);
+  const stored = h.coordinator.engine.listObservations(id, { source: 'screen' });
+  assert.ok(stored.ok);
+  const observation = stored.value[0];
+  assert.ok(observation?.source === 'screen');
+  assert.equal(observation.mediaSource, 'camera');
+  assert.equal(observation.evidenceQuality, 'clear', 'mock adapter supplied clear evidence to exercise the engine guard');
+  const session = h.coordinator.engine.getSession(id);
+  assert.ok(session.ok);
+  assert.equal(session.value.recommendations.length, 0);
 }));
 
 test('oversized frame without Content-Length (chunked) is cut off while streaming', () => withBridge({ maxFrameBytes: 1024 }, async (h) => {
@@ -369,7 +390,7 @@ test('oversized frame without Content-Length (chunked) is cut off while streamin
   h.clock.set(10);
   const r = await h.raw({
     method: 'POST', path: `/v1/sessions/${id}/frames`,
-    headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'image/png', 'transfer-encoding': 'chunked', 'x-capture-generation': '1', 'x-observed-at': at(9) },
+    headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'image/png', 'transfer-encoding': 'chunked', 'x-media-source': 'screen_share', 'x-capture-generation': '1', 'x-observed-at': at(9) },
     chunks: [Buffer.alloc(600), Buffer.alloc(600)],
   });
   assert.ok(r !== 'destroyed');
@@ -500,7 +521,7 @@ test('client disconnect mid-vision cancels the frame; the bridge stays healthy',
   h.visionGate.hold();
   const outcome = await h.raw({
     method: 'POST', path: `/v1/sessions/${id}/frames`,
-    headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'image/jpeg', 'content-length': '3', 'x-capture-generation': '1', 'x-observed-at': at(8) },
+    headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'image/jpeg', 'content-length': '3', 'x-media-source': 'screen_share', 'x-capture-generation': '1', 'x-observed-at': at(8) },
     chunks: [Buffer.from([1, 2, 3])],
     destroyAfterMs: 50,
   });
@@ -538,7 +559,7 @@ test('logs and error bodies contain no transcript text, image bytes, tokens or c
 // ── Round 2 fixes: one deadline across upload + vision; bodyless routes ─────
 
 const frameHeaders = (generation = '1', observedAt = at(8)) => ({
-  authorization: `Bearer ${AGENT}`, 'content-type': 'image/jpeg', 'x-capture-generation': generation, 'x-observed-at': observedAt,
+  authorization: `Bearer ${AGENT}`, 'content-type': 'image/jpeg', 'x-media-source': 'screen_share', 'x-capture-generation': generation, 'x-observed-at': observedAt,
 });
 
 test('[B2-1] incomplete upload: 504 at the deadline, no vision, nothing stored (original repro)', () => withBridge({ frameTimeoutMs: 50 }, async (h) => {

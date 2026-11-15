@@ -37,13 +37,14 @@ const PARTICIPANTS = ['Alex', 'Jordan', 'Sam'];
 
 type FeedStep =
   | { source: 'transcript'; text: string }
-  | { source: 'screen'; summary: string; facts: Record<string, boolean> };
+  | { source: 'screen'; mediaSource: 'screen_share'; summary: string; facts: Record<string, boolean> };
 
 /** The scripted demo story. Each step is ingested with the CURRENT capture generation. */
 export const SYNTHETIC_FEED: readonly FeedStep[] = [
   { source: 'transcript', text: 'Alex is responsible for left defense.' },
   {
     source: 'screen',
+    mediaSource: 'screen_share',
     summary: 'Synthetic game frame: the left defensive zone appears uncovered.',
     facts: { leftZoneVisible: true, leftZoneUncovered: true },
   },
@@ -107,6 +108,7 @@ export function createInProcessBackend(options: InProcessOptions = {}): Sidekick
     } else {
       unwrap(
         coordinator.ingestScreen(sessionId, {
+          mediaSource: step.mediaSource,
           captureGeneration: generation,
           observedAt,
           summary: step.summary,

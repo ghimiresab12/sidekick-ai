@@ -16,7 +16,7 @@ test('observations and recommendations are rejected until consent', () => {
   const sid = value(engine.createSession()).id;
   assert.equal(error(engine.ingestConversation(sid, { captureGeneration: gen(engine, sid),  observedAt: at(0), text: 'hi' })), 'consent_required');
   assert.equal(
-    error(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),  observedAt: at(0), summary: 'x', evidenceQuality: 'clear' })),
+    error(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid),  observedAt: at(0), summary: 'x', evidenceQuality: 'clear' })),
     'consent_required',
   );
   assert.equal(error(propose(engine, sid)(candidate(['nope']))), 'consent_required');
@@ -43,7 +43,7 @@ test('pause blocks ingest, marks active cards stale, resume re-enables ingest', 
   value(engine.pause(sid));
   assert.equal(value(engine.getSession(sid)).recommendations[0]?.status, 'stale');
   assert.equal(
-    error(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 'x', evidenceQuality: 'clear' })),
+    error(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 'x', evidenceQuality: 'clear' })),
     'session_not_active',
   );
 
@@ -62,7 +62,7 @@ test('observations captured during a pause are rejected even if delivered after 
   value(engine.resume(sid));
   clock.set(21);
   assert.equal(
-    error(engine.ingestScreen(sid, { captureGeneration: pausedGeneration, observedAt: at(15), summary: 'late', evidenceQuality: 'clear' })),
+    error(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: pausedGeneration, observedAt: at(15), summary: 'late', evidenceQuality: 'clear' })),
     'invalid_generation',
   );
 });
@@ -72,7 +72,7 @@ test('end stops processing permanently and keeps the timeline', () => {
   clock.set(1);
   screen(engine, sid, 1);
   value(engine.end(sid));
-  assert.equal(error(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 'x', evidenceQuality: 'clear' })), 'session_not_active');
+  assert.equal(error(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 'x', evidenceQuality: 'clear' })), 'session_not_active');
   assert.equal(error(engine.resume(sid)), 'invalid_transition');
   assert.equal(error(engine.startWithConsent(sid)), 'invalid_transition');
   assert.equal(error(engine.addParticipant(sid, { displayName: 'Late' })), 'session_not_active');
@@ -92,7 +92,7 @@ test('discard removes all session data and subscriptions', () => {
   assert.equal(error(engine.getSession(sid)), 'session_not_found');
   assert.equal(error(engine.getTimeline(sid)), 'session_not_found');
   assert.equal(error(engine.getOverlayState(sid)), 'session_not_found');
-  assert.equal(error(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 'x', evidenceQuality: 'clear' })), 'session_not_found');
+  assert.equal(error(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 'x', evidenceQuality: 'clear' })), 'session_not_found');
   assert.equal(error(engine.discard(sid)), 'session_not_found');
   assert.equal(calls, before, 'no notifications after discard');
 });

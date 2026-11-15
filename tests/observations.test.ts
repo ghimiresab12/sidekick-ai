@@ -37,7 +37,7 @@ test('observedAt is normalized to UTC; receivedAt uses the engine clock', () => 
 test('rejects invalid, future and pre-consent timestamps', () => {
   const { engine, clock, sid } = activeSession();
   clock.set(100);
-  const send = (observedAt: string) => engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),  observedAt, summary: 's', evidenceQuality: 'clear' });
+  const send = (observedAt: string) => engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid),  observedAt, summary: 's', evidenceQuality: 'clear' });
   assert.equal(error(send('not-a-time')), 'invalid_timestamp');
   assert.equal(error(send('2026-02-30T00:00:00Z')), 'invalid_timestamp');
   assert.equal(error(send(at(106))), 'timestamp_out_of_range', 'beyond 5s skew into the future');
@@ -48,13 +48,14 @@ test('rejects invalid, future and pre-consent timestamps', () => {
 test('rejects malformed screen input, inline media and oversized text', () => {
   const { engine, clock, sid } = activeSession();
   clock.set(1);
-  const base = { captureGeneration: gen(engine, sid), observedAt: at(1), summary: 'ok', evidenceQuality: 'clear' as const };
+  const base = { mediaSource: 'screen_share' as const, captureGeneration: gen(engine, sid), observedAt: at(1), summary: 'ok', evidenceQuality: 'clear' as const };
   assert.equal(error(engine.ingestScreen(sid, { ...base, evidenceQuality: 'certain' as never })), 'invalid_input');
   assert.equal(error(engine.ingestScreen(sid, { ...base, summary: '' })), 'invalid_input');
   assert.equal(error(engine.ingestScreen(sid, { ...base, summary: 'x'.repeat(501) })), 'invalid_input');
   assert.equal(error(engine.ingestScreen(sid, { ...base, frameRef: 'data:image/png;base64,AAAA' })), 'invalid_input');
   assert.equal(error(engine.ingestScreen(sid, { ...base, facts: { nested: { a: 1 } } as never })), 'invalid_input');
   assert.equal(error(engine.ingestScreen(sid, null as never)), 'invalid_input');
+  assert.equal(error(engine.ingestScreen(sid, { ...base, mediaSource: 'video' } as never)), 'invalid_input');
   assert.equal(error(engine.ingestConversation(sid, { captureGeneration: gen(engine, sid),  observedAt: at(1), text: 'x'.repeat(1001) })), 'invalid_input');
 });
 
@@ -75,7 +76,7 @@ test('observation limit bounds memory and is surfaced', () => {
   clock.set(1);
   screen(engine, sid, 1);
   screen(engine, sid, 1);
-  assert.equal(error(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 's', evidenceQuality: 'clear' })), 'observation_limit_reached');
+  assert.equal(error(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 's', evidenceQuality: 'clear' })), 'observation_limit_reached');
   assert.equal(value(engine.getSession(sid)).observationLimitReached, true);
 });
 

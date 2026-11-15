@@ -412,12 +412,13 @@ export class SidekickCoordinator {
     if (snap.value.status !== 'active') return { ok: false, error: 'session_not_active' };
     if (
       !isObject(frame) ||
+      (frame.mediaSource !== 'camera' && frame.mediaSource !== 'screen_share') ||
       !(frame.image instanceof Uint8Array) ||
       frame.image.byteLength === 0 ||
       frame.image.byteLength > this.#maxFrameBytes ||
       !MIME_TYPES.has(frame.mimeType as string)
     ) {
-      return { ok: false, error: 'invalid_input', detail: 'frame must be a non-empty JPEG/PNG/WebP image within the size limit' };
+      return { ok: false, error: 'invalid_input', detail: 'frame must have a supported source and be a non-empty JPEG/PNG/WebP image within the size limit' };
     }
     // Snapshot capture metadata now; nothing below re-reads the (mutable) input object.
     const generation = frame.captureGeneration;
@@ -452,7 +453,7 @@ export class SidekickCoordinator {
       // ignores `signal`; a late result from such an adapter is discarded.
       description = await untilAborted(
         this.#vision.describe(
-          { captureGeneration: generation, observedAt, image: frame.image, mimeType: frame.mimeType },
+          { mediaSource: frame.mediaSource, captureGeneration: generation, observedAt, image: frame.image, mimeType: frame.mimeType },
           signal,
         ),
         signal,
@@ -477,6 +478,7 @@ export class SidekickCoordinator {
       return { ok: false, error: 'vision_failed', detail: 'vision returned no description' };
     }
     const input: ScreenInput = {
+      mediaSource: frame.mediaSource,
       captureGeneration: generation,
       observedAt,
       summary: description.summary as string,

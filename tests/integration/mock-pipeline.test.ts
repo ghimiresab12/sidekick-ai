@@ -113,7 +113,7 @@ function setup(options: { reasoningGate?: ReturnType<typeof gate>; reasoning?: R
   };
   /** A frame "captured" now with the current generation (or an explicit one). */
   const captureFrame = (seconds: number, uncovered = true, captureGeneration = generation()): FrameInput => ({
-    captureGeneration,
+    mediaSource: 'screen_share', captureGeneration,
     observedAt: at(seconds),
     mimeType: 'image/jpeg',
     image: new TextEncoder().encode(JSON.stringify({
@@ -435,7 +435,7 @@ test('[R3-1] newer COVERED frame during in-flight reasoning: obsolete advice is 
 test('[R3-1] newer UNKNOWN-quality frame during in-flight reasoning is treated conservatively', async () => {
   const h = await inFlightWithNewerFrame(async (h) =>
     value(h.coordinator.ingestScreen(h.sid, {
-      captureGeneration: h.generation(), observedAt: at(9), summary: 'Blurred frame.', evidenceQuality: 'unknown',
+      mediaSource: 'screen_share', captureGeneration: h.generation(), observedAt: at(9), summary: 'Blurred frame.', evidenceQuality: 'unknown',
     })));
   assert.equal(h.recs().length, 0);
   assert.ok(h.diagnostics.some((d) => d.type === 'reasoning_discarded' && d.reason === 'evidence_superseded'));
@@ -454,7 +454,7 @@ test('[R3-1] an existing unrelated card is not invalidated by a superseded resul
   h.say(2, ROLE_LINE);
   await h.coordinator.whenIdle(h.sid);
   value(h.coordinator.ingestScreen(h.sid, {
-    captureGeneration: h.generation(), observedAt: at(2), summary: 'other', evidenceQuality: 'clear',
+    mediaSource: 'screen_share', captureGeneration: h.generation(), observedAt: at(2), summary: 'other', evidenceQuality: 'clear',
   }));
   await h.coordinator.whenIdle(h.sid);
   const rev = value(h.engine.getSession(h.sid)).contextRevision;
@@ -674,7 +674,7 @@ async function contradiction(older: { summary: string; facts?: Record<string, bo
   const h = setup({ reasoning: summaryReader, ...(conditionFactKeys ? { conditionFactKeys } : {}) });
   const ingest = (seconds: number, frame: { summary: string; facts?: Record<string, boolean> }) =>
     value(h.coordinator.ingestScreen(h.sid, {
-      captureGeneration: h.generation(), observedAt: at(seconds), evidenceQuality: 'clear', summary: frame.summary,
+      mediaSource: 'screen_share', captureGeneration: h.generation(), observedAt: at(seconds), evidenceQuality: 'clear', summary: frame.summary,
       ...(frame.facts ? { facts: frame.facts } : {}),
     }));
   h.reasoningGate.hold();

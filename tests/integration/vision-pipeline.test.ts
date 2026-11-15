@@ -56,7 +56,7 @@ function setup(fetchImpl: typeof fetch) {
   const sid = session.value.id;
   const active = c.startWithConsent(sid); assert.ok(active.ok);
   assert.ok(c.engine.confirmActivity(sid, 'gaming').ok);
-  const frame: FrameInput = { image: scenePng('uncovered'), mimeType: 'image/png',
+  const frame: FrameInput = { mediaSource: 'screen_share', image: scenePng('uncovered'), mimeType: 'image/png',
     observedAt: new Date(now).toISOString(), captureGeneration: active.value.captureGeneration };
   return { c, sid, frame, advance: (ms: number) => { now += ms; } };
 }

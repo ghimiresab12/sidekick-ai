@@ -18,7 +18,7 @@ function setup(maxFrameBytes?: number, skew = 5000) {
   const session = c.startWithConsent(created.value.id);
   assert.ok(session.ok);
   const frame: FrameInput = {
-    captureGeneration: session.value.captureGeneration,
+    mediaSource: 'screen_share', captureGeneration: session.value.captureGeneration,
     observedAt: new Date(startMs).toISOString(), image: new Uint8Array([1]), mimeType: 'image/png',
   };
   return { c, sid: created.value.id, frame, calls: () => calls };

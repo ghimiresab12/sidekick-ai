@@ -27,14 +27,14 @@ test('snapshot labels condition vs context evidence and contains no internal dat
   value(engine.assignRole(sid, alex.id, 'left defense', { source: 'manual' }));
   clock.set(20);
   const u = say(engine, sid, 2);
-  const obs = value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),
+  const obs = value(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid),
     observedAt: '2026-11-14T18:00:20Z', summary: 'empty', evidenceQuality: 'clear', frameRef: 'frame-123',
   }));
   value(propose(engine, sid)(candidate([obs.id], { contextObservationIds: [u.id], relatedParticipantIds: [alex.id] })));
   const state = value(engine.getOverlayState(sid));
   const card = state.prominent!;
   assert.deepEqual(card.evidence, [
-    { observationId: obs.id, kind: 'condition', source: 'screen', observedAt: obs.observedAt },
+    { observationId: obs.id, kind: 'condition', source: 'screen', mediaSource: 'screen_share', observedAt: obs.observedAt },
     { observationId: u.id, kind: 'context', source: 'transcript', observedAt: u.observedAt },
   ]);
   assert.deepEqual(card.relatedParticipants, [{ id: alex.id, displayName: 'Alex', role: 'left defense' }]);

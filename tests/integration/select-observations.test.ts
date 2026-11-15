@@ -57,9 +57,9 @@ test('[R3-2] excludes only future-stamped observations and reports the earliest 
   const { engine, clock, sid } = activeSession();
   clock.set(10);
   const talk = say(engine, sid, 9, 'eligible now');
-  const ready = value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid), observedAt: at(10), summary: 'ready', evidenceQuality: 'clear' }));
-  value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid), observedAt: at(13), summary: 'later', evidenceQuality: 'clear' }));
-  value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid), observedAt: at(12), summary: 'soon', evidenceQuality: 'clear' }));
+  const ready = value(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid), observedAt: at(10), summary: 'ready', evidenceQuality: 'clear' }));
+  value(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid), observedAt: at(13), summary: 'later', evidenceQuality: 'clear' }));
+  value(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid), observedAt: at(12), summary: 'soon', evidenceQuality: 'clear' }));
   const sel = value(selectObservations(engine, value(engine.getSession(sid)), Date.parse(at(10)), STALE));
   assert.deepEqual(sel.observations.map((o) => o.id), [talk.id, ready.id], 'eligible evidence is processed now');
   assert.equal(sel.nextEligibleAtMs, Date.parse(at(12)), 'earliest future observation');
@@ -70,7 +70,7 @@ test('[R3-2] excludes only future-stamped observations and reports the earliest 
 
 const frame = (engine: Parameters<typeof gen>[0], sid: string, seconds: number, quality: 'clear' | 'partial' | 'unknown', facts?: Record<string, boolean>) =>
   value(engine.ingestScreen(sid, {
-    captureGeneration: gen(engine, sid), observedAt: at(seconds), summary: 'frame', evidenceQuality: quality, ...(facts ? { facts } : {}),
+    mediaSource: 'screen_share', captureGeneration: gen(engine, sid), observedAt: at(seconds), summary: 'frame', evidenceQuality: quality, ...(facts ? { facts } : {}),
   }));
 
 test('[R3-1] newer disagreeing, unclear or fact-less frames supersede; agreeing frames and transcripts do not', () => {
@@ -116,9 +116,9 @@ test('[R4-2] future frames beyond maxScreens cannot crowd out eligible frames or
   const role = say(engine, sid, 1, 'Alex is responsible for left defense.');
   value(engine.assignRole(sid, alex.id, 'left defense', { source: 'transcript', sourceObservationId: role.id }));
   const eligible = [8, 9, 10].map((s) => value(engine.ingestScreen(sid, {
-    captureGeneration: gen(engine, sid), observedAt: at(s), summary: 'eligible', evidenceQuality: 'clear' })));
+    mediaSource: 'screen_share', captureGeneration: gen(engine, sid), observedAt: at(s), summary: 'eligible', evidenceQuality: 'clear' })));
   for (let i = 0; i < 40; i++) {
-    value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid), observedAt: at(10.1 + i * 0.1), summary: 'future', evidenceQuality: 'clear' }));
+    value(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid), observedAt: at(10.1 + i * 0.1), summary: 'future', evidenceQuality: 'clear' }));
   }
   const sel = value(selectObservations(engine, value(engine.getSession(sid)), Date.parse(at(10)), STALE, {
     ...DEFAULT_SELECTION_LIMITS, maxScreens: 20,
@@ -130,7 +130,7 @@ test('[R4-2] future frames beyond maxScreens cannot crowd out eligible frames or
 });
 
 const screenObs = (summary: string, facts?: Record<string, boolean>, evidenceQuality: 'clear' | 'unknown' = 'clear') => ({
-  id: summary, sessionId: 's', captureGeneration: 1, source: 'screen' as const, observedAt: at(1), receivedAt: at(1),
+  id: summary, sessionId: 's', captureGeneration: 1, source: 'screen' as const, mediaSource: 'screen_share' as const, observedAt: at(1), receivedAt: at(1),
   summary, evidenceQuality, ...(facts ? { facts } : {}),
 });
 
@@ -146,6 +146,7 @@ test('[R4-1] framesEquivalent: partial or empty facts never make contradictory s
     'identical (normalized) summary + identical facts');
   assert.equal(framesEquivalent(screenObs('Same'), screenObs('same'), []), true, 'identical summary, no facts on either');
   assert.equal(framesEquivalent(screenObs('same', { x: true }), screenObs('same', { x: false }), []), false, 'same text, different facts');
+  assert.equal(framesEquivalent(screenObs('same'), { ...screenObs('same'), mediaSource: 'camera' }, []), false, 'different capture sources are not equivalent');
   const full = { leftZoneVisible: true, leftZoneUncovered: true };
   assert.equal(framesEquivalent(screenObs('Zone empty', full), screenObs('Nobody on the left', full), MVP), true,
     'complete structured condition, different wording');

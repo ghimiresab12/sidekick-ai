@@ -97,7 +97,7 @@ async function start(env: Record<string, string> = {}, frameTimeoutMs = 2_000) {
   const frame = (id: string, image: Uint8Array, o: { mime?: string; generation?: number | string; observedAt?: string } = {}) =>
     api('POST', `/v1/sessions/${id}/frames`, {
       token: AGENT, body: image,
-      headers: { 'content-type': o.mime ?? 'image/png', 'x-capture-generation': String(o.generation ?? 1), 'x-observed-at': o.observedAt ?? new Date().toISOString() },
+      headers: { 'content-type': o.mime ?? 'image/png', 'x-media-source': 'screen_share', 'x-capture-generation': String(o.generation ?? 1), 'x-observed-at': o.observedAt ?? new Date().toISOString() },
     });
   const screens = (id: string): Observation[] => {
     const r = engine.listObservations(id, { source: 'screen' });
@@ -188,7 +188,7 @@ test('[V] wrong type, oversized, bad timestamp and stale generation never reach 
   const oversized = await new Promise<number>((resolve, reject) => {
     const req = httpRequest({
       host: '127.0.0.1', port: h.port, method: 'POST', path: `/v1/sessions/${id}/frames`,
-      headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'image/png', 'content-length': String(5 * 1024 * 1024 + 1), 'x-capture-generation': String(generation), 'x-observed-at': new Date().toISOString() },
+      headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'image/png', 'content-length': String(5 * 1024 * 1024 + 1), 'x-media-source': 'screen_share', 'x-capture-generation': String(generation), 'x-observed-at': new Date().toISOString() },
     }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
     req.on('error', reject);
     req.flushHeaders();
@@ -269,7 +269,7 @@ test('[V] adapter-own timeout (shorter than the caller\'s) maps to vision_timeou
   const started = coordinator.startWithConsent(created.value.id);
   assert.ok(started.ok);
   const r = await coordinator.ingestFrame(created.value.id, {
-    captureGeneration: started.value.captureGeneration, observedAt: new Date().toISOString(), image: scenePng('uncovered'), mimeType: 'image/png',
+    mediaSource: 'screen_share', captureGeneration: started.value.captureGeneration, observedAt: new Date().toISOString(), image: scenePng('uncovered'), mimeType: 'image/png',
   });
   assert.equal(!r.ok && r.error, 'vision_timeout');
 });
@@ -311,7 +311,7 @@ test('[V] client disconnect during the Gemini call cancels it; nothing stored', 
   await new Promise<void>((resolve) => {
     const req = httpRequest({
       host: '127.0.0.1', port: h.port, method: 'POST', path: `/v1/sessions/${id}/frames`,
-      headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'image/png', 'content-length': String(image.length), 'x-capture-generation': String(generation), 'x-observed-at': new Date().toISOString() },
+      headers: { authorization: `Bearer ${AGENT}`, 'content-type': 'image/png', 'content-length': String(image.length), 'x-media-source': 'screen_share', 'x-capture-generation': String(generation), 'x-observed-at': new Date().toISOString() },
     });
     req.on('error', () => resolve());
     req.end(image);

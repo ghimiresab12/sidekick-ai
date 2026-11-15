@@ -89,6 +89,7 @@ export function validateInput(value: unknown): asserts value is ReasoningInput {
       text(o.text, 1000);
       if (o.speakerParticipantId !== undefined && !participantIds.has(o.speakerParticipantId as string)) throw Error('Unknown speaker');
     } else if (o.source === 'screen') {
+      oneOf(o.mediaSource, ['camera', 'screen_share']);
       text(o.summary, 500); oneOf(o.evidenceQuality, ['clear', 'partial', 'unknown']);
       if (o.frameRef !== undefined) {
         text(o.frameRef, 256);

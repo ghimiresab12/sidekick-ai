@@ -50,7 +50,7 @@ export async function runVisionScenario(scene, { live = false, visionOnly = fals
       observedAt: new Date().toISOString(), text: 'Alex is responsible for left defense.' }));
     await c.whenIdle(sid);
     const capturedAt = new Date().toISOString();
-    const observation = unwrap(await c.ingestFrame(sid, { captureGeneration: active.captureGeneration,
+    const observation = unwrap(await c.ingestFrame(sid, { mediaSource: 'screen_share', captureGeneration: active.captureGeneration,
       observedAt: capturedAt, image, mimeType: 'image/png' }));
     await c.whenIdle(sid);
     const session = unwrap(c.engine.getSession(sid));

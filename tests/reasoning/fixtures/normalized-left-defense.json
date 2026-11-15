@@ -17,7 +17,7 @@
     },
     {
       "id": "screen-1", "sessionId": "mock-session-1", "captureGeneration": 1,
-      "source": "screen", "observedAt": "2026-11-14T20:00:08Z", "receivedAt": "2026-11-14T20:00:08Z",
+      "source": "screen", "mediaSource": "screen_share", "observedAt": "2026-11-14T20:00:08Z", "receivedAt": "2026-11-14T20:00:08Z",
       "summary": "The left defensive zone is clearly visible and contains no defending players.",
       "evidenceQuality": "clear", "facts": { "leftZoneVisible": true, "leftZoneUncovered": true }
     }

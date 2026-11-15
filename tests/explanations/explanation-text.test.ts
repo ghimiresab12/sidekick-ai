@@ -8,7 +8,7 @@ const TRANSCRIPT = 'Alex is responsible for left defense. My phone number is 555
 function context(over: Partial<ExplanationContext> = {}): ExplanationContext {
   return {
     recommendation: { shortAdvice: 'Ask Alex to cover left defense or arrange backup coverage' } as ExplanationContext['recommendation'],
-    conditionEvidence: [{ id: 's1', sessionId: 'x', captureGeneration: 1, source: 'screen', observedAt: '', receivedAt: '', summary: 'The full left defensive zone is visible and appears uncovered', evidenceQuality: 'clear' }],
+    conditionEvidence: [{ id: 's1', sessionId: 'x', captureGeneration: 1, source: 'screen', mediaSource: 'screen_share', observedAt: '', receivedAt: '', summary: 'The full left defensive zone is visible and appears uncovered', evidenceQuality: 'clear' }],
     contextEvidence: [{ id: 't1', sessionId: 'x', captureGeneration: 1, source: 'transcript', observedAt: '', receivedAt: '', text: TRANSCRIPT }],
     contextAtCreation: { contextRevision: 1, capturedAt: '', participants: [{ participantId: 'p1', displayName: 'Alex', role: 'left defense', roleRevision: 1 }] },
     changesSinceCreation: [],

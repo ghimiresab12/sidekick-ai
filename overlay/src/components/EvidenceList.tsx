@@ -19,6 +19,7 @@ export function EvidenceList({ items, compact = false }: { items: Evidence; comp
           {items.map((e) => (
             <li key={`${e.kind}-${e.observationId}`}>
               <span className={`tag tag-${e.source}`}>{SOURCE_LABEL[e.source]}</span>
+              {e.mediaSource && <span className="tag tag-screen">{e.mediaSource === 'camera' ? 'Camera' : 'Shared screen'}</span>}
               <span className="evidence-summary">{EVIDENCE_KIND_LABEL[e.kind]}</span>
               <span className="evidence-meta">observed {formatClock(e.observedAt)}</span>
             </li>

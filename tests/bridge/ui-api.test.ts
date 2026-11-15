@@ -157,7 +157,7 @@ async function start(opts: Opts = {}) {
     const cap = await http('GET', `/v1/sessions/${id}/capture`, { token: AGENT });
     return http('POST', `/v1/sessions/${id}/frames`, {
       token: AGENT, body: scenePng(scene),
-      headers: { 'content-type': 'image/png', 'x-capture-generation': String(cap.body!.captureGeneration), 'x-observed-at': at(seconds) },
+      headers: { 'content-type': 'image/png', 'x-media-source': 'screen_share', 'x-capture-generation': String(cap.body!.captureGeneration), 'x-observed-at': at(seconds) },
     });
   }
   const recs = (id: string) => { const r = engine.getSession(id); return r.ok ? r.value.recommendations : []; };

@@ -31,6 +31,17 @@ test('creates an active card with condition/context evidence and a context snaps
   assert.equal(rec.contextAtCreation.contextRevision, 1);
 });
 
+test('camera observations cannot be condition evidence for screen-share soccer coaching', () => {
+  const { engine, clock, sid } = activeSession();
+  clock.set(20);
+  const observation = value(engine.ingestScreen(sid, {
+    mediaSource: 'camera', captureGeneration: gen(engine, sid), observedAt: at(19), summary: 'clear-looking camera image',
+    evidenceQuality: 'clear', facts: { leftZoneVisible: true, leftZoneUncovered: true },
+  }));
+  const result = propose(engine, sid)(candidate([observation.id]));
+  assert.equal(error(result), 'insufficient_evidence');
+});
+
 test('duplicate fingerprint while active merges instead of creating a second card', () => {
   const { engine, clock, sid } = activeSession();
   clock.set(20);
@@ -103,7 +114,7 @@ test('[F2] fresh context merged into a card never refreshes it or delays stalene
 test('[F2] condition evidence of unknown quality is rejected; overlap is rejected', () => {
   const { engine, clock, sid } = activeSession();
   clock.set(1);
-  const blurry = value(engine.ingestScreen(sid, { captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 'unclear', evidenceQuality: 'unknown' }));
+  const blurry = value(engine.ingestScreen(sid, { mediaSource: 'screen_share', captureGeneration: gen(engine, sid),  observedAt: at(1), summary: 'unclear', evidenceQuality: 'unknown' }));
   assert.equal(error(propose(engine, sid)(candidate([blurry.id]))), 'insufficient_evidence');
   const ok = screen(engine, sid, 1);
   assert.equal(error(propose(engine, sid)(candidate([ok.id], { contextObservationIds: [ok.id] }))), 'invalid_input');

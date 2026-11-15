@@ -463,7 +463,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 1. **Session:** on job start, `createSession({ externalRef: <room name> })`. Lifecycle (start, pause, resume, end) comes from the companion UI, not from the agent.
 2. **Generation:** the agent reads `captureGeneration` from the bridge at the moment it captures input, and sends it with that input.
 3. **Transcripts:** speech-to-text events become `ConversationInput { captureGeneration, observedAt, text, speakerRef? }` and go to `ingestConversation`.
-4. **Frames:** a sampled screen-share frame becomes `FrameInput` bytes plus generation and time, and goes to `ingestFrame`. The bridge passes them to vision in memory only.
+4. **Frames:** a sampled camera or screen-share frame becomes `FrameInput` bytes plus explicit `mediaSource`, generation and time, and goes to `ingestFrame`. The bridge passes them to vision in memory only.
 5. **Speech output:** none. The agent publishes no audio, except one connection greeting if a real call proves Chert requires it.
 
 ### Remaining unknowns
@@ -503,7 +503,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 | `POST /v1/sessions` | agent, control (milestone 4) | `{externalRef}` (room name) | `createSession` | `201` new / `200` existing non-ended session for that room |
 | `GET /v1/sessions/:id/capture` | either | — | engine read | `{sessionId, status, consentGiven, captureGeneration, acceptingInput}` |
 | `POST /v1/sessions/:id/transcripts` | agent | JSON `{captureGeneration, observedAt, text, speakerRef?}` (no other keys) | `ingestConversation` | `202 {observationId, captureGeneration, observedAt}` |
-| `POST /v1/sessions/:id/frames` | agent | raw `image/jpeg\|png\|webp` bytes; headers `X-Capture-Generation`, `X-Observed-At` | `ingestFrame` (awaits vision) | `200 {observationId, captureGeneration, observedAt}` |
+| `POST /v1/sessions/:id/frames` | agent | raw `image/jpeg\|png\|webp` bytes; required headers `X-Media-Source: camera\|screen_share`, `X-Capture-Generation`, `X-Observed-At` | `ingestFrame` (awaits vision) | `200 {observationId, captureGeneration, observedAt}` |
 | `POST /v1/sessions/:id/consent` | control **only** | exactly `{"consent": true, "allParticipantsAgreed": true}` (milestone 4: the operator attests that **all** participants agreed) | `startWithConsent` | `200` lifecycle view |
 | `POST /v1/sessions/:id/pause` / `resume` / `end` | control, ui (milestone 4) | **none** (any declared body is rejected) | `pause` / `resume` / `end` | `200` lifecycle view |
 | `DELETE /v1/sessions/:id` | control, ui (milestone 4) | **none** | `discard`, plus revoking all UI cookies | `204` |
@@ -528,7 +528,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 
 ### Capture metadata, timeouts and cancellation
 
-- `X-Capture-Generation` and `X-Observed-At` are read from headers **before** the frame body is read, then passed unchanged through `ingestFrame`. The coordinator snapshots them before awaiting vision. Responses return the stored values; `observedAt` is normalized to UTC but is the same instant.
+- `X-Media-Source`, `X-Capture-Generation` and `X-Observed-At` are validated from headers **before** the frame body is read, then passed unchanged through `ingestFrame`. The coordinator snapshots them before awaiting vision. Responses return the stored generation and time; `observedAt` is normalized to UTC but is the same instant. Invalid/missing source is `400 invalid_media_source`.
 - **One deadline per frame request** (`frameTimeoutMs`, default 10 s) covers **body upload and vision together** (revised after review). The body reader watches the same cancellation signal, so an upload that stalls or trickles is cut off at the deadline. Buffered image chunks are released, the response is `504 vision_timeout`, and the connection is closed. If the client has already disconnected, cleanup runs and no response is attempted. Separately, the coordinator's `ingestFrame` accepts an optional caller `signal`. The bridge aborts it on **timeout** and on **client disconnect**, and pause, end and discard abort it through the coordinator's period signal. **An aborted frame is never ingested**, even if vision finishes later.
 - The coordinator **races the vision call against the signal**, so cancellation returns immediately even if an adapter ignores `signal` (changed in this milestone; regression-tested in `tests/integration/frame-cancellation.test.ts`).
 - Requests are independent: several frames may be in flight at once, so the agent never has to block on one.
@@ -553,7 +553,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 3. **Before capturing anything:** read `GET /v1/sessions/:id/capture`. Capture and send **only while `acceptingInput` is true**. Consent and lifecycle come from the control side.
 4. **At capture time:** record `captureGeneration` (from the latest capture-state read) and `observedAt` (your capture timestamp, ISO 8601 with a timezone). Carry both unchanged with that item; never re-read them when sending.
 5. **Transcripts:** `POST /v1/sessions/:id/transcripts` with JSON. Set `speakerRef` only if LiveKit speaker attribution is verified.
-6. **Frames:** `POST /v1/sessions/:id/frames` with the encoded JPEG, PNG or WebP bytes as the body (≤5 MiB) and the two `X-` headers.
+6. **Frames:** `POST /v1/sessions/:id/frames` with the encoded JPEG, PNG or WebP bytes as the body (≤5 MiB), `X-Media-Source: screen_share` for the controlled soccer demo, and the capture-generation/time headers. `camera` is accepted by the internal contract but produces unknown evidence under the screen-only soccer profile and is not sent to Gemini.
    - Send from a background task or queue, never on the audio or call path.
    - Use a client timeout a little above the bridge's 10 s. That deadline counts **upload time too**, so send the complete encoded frame in one request, over the loopback connection.
    - Keep **at most one frame in flight** and drop frames rather than queue them. Prabin's Gemini vision adapter accepts one request at a time and rejects extras as busy, which the bridge reports as `429 vision_busy`. The bridge's 10 s deadline is shorter than the adapter's own 15 s timeout, so the bridge deadline governs.
@@ -757,7 +757,9 @@ All of these are server-only.
 
 ## Decision update — camera, shared screen, and realtime conversation (2026-11-15)
 
-Product behavior is now defined in `requirements.md` and supersedes the previous private-only speech target where it conflicts. The current implementation is not yet this product: `FrameInput` is implicitly a screen frame, `GeminiVision` only recognizes `controlled-soccer-v1`, and the overlay voice control performs local on-device TTS for one selected recommendation. The Python agent and Chert media interface have not been proven to supply camera frames, shared-screen frames, or bidirectional realtime audio.
+Product behavior is now defined in `requirements.md` and supersedes the previous private-only speech target where it conflicts. Phase 1 now distinguishes camera and screen-share frame sources in the internal contract, API, stored observations, reasoning context and evidence labels. `GeminiVision` still only recognizes `controlled-soccer-v1`; camera frames receive an unknown “unsupported” observation and are not sent to Gemini. The overlay voice control still performs local on-device TTS for one selected recommendation. The Python agent and Chert media interface have not been proven to supply camera frames, shared-screen frames, or bidirectional realtime audio.
+
+Latest Chert check on 2026-11-15: project/session/clock/LiveKit, the assigned line and its worker all pass; line is free. The agent join check was skipped. `OPENAI_API_KEY` is absent from the agent environment, while `agent/src/agent.py` selects `openai/gpt-live-1` through LiveKit Inference. Resolve or verify that model credential requirement before joining a test room. A passing line/worker check does not establish that the agent joins, that media events reach it, or that it speaks in FaceTime.
 
 Implementation boundary for the next code phase:
 

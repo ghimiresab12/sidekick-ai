@@ -78,6 +78,7 @@ function integer(value: number, min: number, max: number, name: string) {
 
 function validateFrame(frame: FrameInput, limit: number) {
   try {
+    if (frame.mediaSource !== 'camera' && frame.mediaSource !== 'screen_share') throw Error();
     integer(frame.captureGeneration, 1, Number.MAX_SAFE_INTEGER, 'generation');
     time(frame.observedAt);
     const b = frame.image;
@@ -135,6 +136,12 @@ export function createGeminiVision(options: GeminiVisionOptions): VisionPort {
     async describe(frame, signal) {
       if (signal.aborted) throw new VisionError('aborted');
       validateFrame(frame, maxBytes);
+      // This adapter only understands the labeled soccer screen demo. Never send
+      // camera imagery to that profile or allow it to produce soccer recommendations.
+      if (frame.mediaSource === 'camera') return {
+        summary: 'Camera input is not supported by controlled-soccer-v1; no scene analysis was performed.',
+        evidenceQuality: 'unknown',
+      };
       if (inFlight >= maxConcurrent) throw new VisionError('busy');
       // Encode synchronously before any await: callers cannot mutate a pending request's bytes.
       const body = JSON.stringify({
