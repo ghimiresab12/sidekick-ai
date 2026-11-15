@@ -118,3 +118,12 @@ The Gemini reasoning feature is developed independently with synthetic normalize
 mock provider responses. Its offline tests and temporary session-engine compatibility check do not
 complete the live Phase 0 gates. See docs/reasoning.md and docs/reasoning-verification.md for commands
 and recorded verification; do not treat mock output as live Gemini or Chert proof.
+
+## Integration milestone 1 status (2026-11-14)
+
+- [x] Coordinator connects the engine and the reasoning module **in-process, with mocks only** (`npm run test:all`).
+- [ ] Authenticated localhost HTTP bridge (next milestone).
+- [ ] Python agent: listen-only mode, transcripts, screen-share frame sampling. Damius must check the APIs against the LiveKit docs and a real Chert call.
+- [ ] Vision adapter (Prabin), using the proposed `VisionPort`.
+- [ ] Prabin to decide on the proposed `maxClockSkewMs` reasoning input.
+- **Blocker:** a real Chert call must confirm whether the connection greeting is mandatory and whether screen share reaches the agent (the CH-2 proof).

@@ -36,7 +36,7 @@
 
 | Item | Choice | Notes |
 |---|---|---|
-| Node.js | **24 LTS** as the team standard (`.nvmrc`). Supported floor is **22** (`"engines": { "node": ">=22" }`) | Tests verified on Node 22.23, 24.22 and 26.13. A future Docker image should use a `node:24` base, which no file pins yet. |
+| Node.js | **24 LTS** as the team standard (`.nvmrc`) and the **supported floor** (`"engines": { "node": ">=24" }`, raised from 22 on 2026-11-14) | Reasoning `.mts` modules run via Node's built-in type stripping and are loaded at runtime by the integration tests; `docs/reasoning.md` already required Node 24. A future Docker image should use a `node:24` base. |
 | TypeScript | `typescript@7.0.2` (dev dependency, exact pin) | `strict`, `NodeNext` modules, ES2022 target. Compiled with `tsc` to `dist/`, so we don't rely on any Node version's built-in type stripping. |
 | Node types | `@types/node@24.19.2` (dev dependency, exact pin) | Matches the Node 24 standard. |
 | Runtime dependencies | **None** | The engine uses only `node:crypto` (`randomUUID`) and built-in `structuredClone`. |
@@ -118,3 +118,9 @@ and are isolated in tools/reasoning. These choices apply to this component, not 
 ### Imported LiveKit Agent Builder export
 
 The repository contains the exported Python LiveKit agent in `agent/`. Its declared shared runtime is Python 3.13 with `uv`; the existing LiveKit dependencies and source entrypoint are preserved. This is an imported starter, **not evidence that Chert FaceTime, screen-share, transcript, overlay, recommendation, private voice, or review integration works**. Keep the current Chert verification gates unchanged. The export did not include `uv.lock`, so package ranges are not yet pinned to exact versions; generate and commit the lockfile after resolving dependencies in an environment with package-index access.
+
+### Integration milestone 1 tooling (2026-11-14)
+
+- `npm run typecheck` now runs two checks: `tsc -p tsconfig.json --noEmit` (engine, coordinator, tests) and `tsc -p tsconfig.reasoning-compat.json`. The second type-checks Prabin's `.mts` reasoning modules together with `tests/integration/reasoning-wiring.mts`, without emitting or modifying them.
+- `npm run test:all` runs the compiled engine and integration suite (`npm test`) and then the reasoning suite (`npm run test:reasoning`).
+- No new dependencies.

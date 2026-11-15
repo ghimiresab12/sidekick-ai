@@ -327,6 +327,24 @@ export interface ExplanationRequest {
   context: ExplanationContext;
 }
 
+// ── Observation queries (read-only) ─────────────────────────────────────────
+
+/** Filters for `listObservations`. All filters are ANDed. */
+export interface ListObservationsQuery {
+  source?: ObservationSource;
+  captureGeneration?: CaptureGeneration;
+  /** Only observations with `observedAt` at or after this time. */
+  observedSince?: IsoTime;
+  /** Only observations with `observedAt` at or before this time. */
+  observedUntil?: IsoTime;
+  /** Only these observation IDs (at most 100). Unknown IDs are ignored. */
+  ids?: string[];
+  /** 1–500, default 100. When more match, the NEWEST `limit` are returned (see `keep`). */
+  limit?: number;
+  /** Which end to keep when more than `limit` match. Default `newest`. Results stay oldest-first. */
+  keep?: 'newest' | 'oldest';
+}
+
 // ── Session timeline (input to the end-of-session review) ───────────────────
 
 interface EventBase {
