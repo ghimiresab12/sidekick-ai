@@ -122,7 +122,7 @@ and recorded verification; do not treat mock output as live Gemini or Chert proo
 ## Integration milestone 1 status (2026-11-14)
 
 - [x] Coordinator connects the engine and the reasoning module **in-process, with mocks only** (`npm run test:all`).
-- [ ] Authenticated localhost HTTP bridge (next milestone).
+- [x] Authenticated localhost HTTP bridge, implemented and tested locally with mocks (milestone 2, 2026-11-15). Not yet exercised by the real Python agent.
 - [ ] Python agent: listen-only mode, transcripts, screen-share frame sampling. Damius must check the APIs against the LiveKit docs and a real Chert call.
 - [ ] Vision adapter (Prabin), using the proposed `VisionPort`.
 - [ ] Prabin to decide on the proposed `maxClockSkewMs` reasoning input.

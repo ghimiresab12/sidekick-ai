@@ -148,3 +148,10 @@ environment setting, not a hardcoded default. This test does not establish produ
 - `npm run typecheck` now runs two checks: `tsc -p tsconfig.json --noEmit` (engine, coordinator, tests) and `tsc -p tsconfig.reasoning-compat.json`. The second type-checks Prabin's `.mts` reasoning modules together with `tests/integration/reasoning-wiring.mts`, without emitting or modifying them.
 - `npm run test:all` runs the compiled engine and integration suite (`npm test`) and then the reasoning suite (`npm run test:reasoning`).
 - No new dependencies.
+
+### HTTP bridge (milestone 2, 2026-11-15)
+
+- Built only on Node built-ins (`node:http`, `node:crypto`) and the global `fetch` in tests. **No new dependencies.**
+- `npm run bridge` builds the project and starts `dist/src/bridge/main.js`, loading `.env` if present (`--env-file-if-exists`). Requires Node 24.
+- New server-only environment variables (names in `.env.example`): `SIDEKICK_AGENT_TOKEN`, `SIDEKICK_CONTROL_TOKEN`, `SIDEKICK_BRIDGE_PORT` and `SIDEKICK_REASONING`. None of them may appear in browser or overlay code.
+- `tsconfig.reasoning-compat.json` now also type-checks `src/bridge/reasoning-wiring.mts` against Prabin's modules.

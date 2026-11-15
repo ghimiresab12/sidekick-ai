@@ -99,6 +99,25 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
 const newPeriod = (): Period => ({ controller: new AbortController() });
 
+/** Resolves/rejects with `work`, or rejects as soon as `signal` aborts — whichever is first. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    work.catch(() => {}); // a late rejection must not become unhandled
+    return Promise.reject(new Error('aborted'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      work.catch(() => {});
+      reject(new Error('aborted'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
+      (e: unknown) => { signal.removeEventListener('abort', onAbort); reject(e); },
+    );
+  });
+}
+
 const defaultTimer = (fn: () => void, delayMs: number): (() => void) => {
   const handle = setTimeout(fn, delayMs);
   handle.unref?.();
@@ -205,10 +224,17 @@ export class SidekickCoordinator {
    * Raw sampled frame → vision → engine. The frame's capture-time generation and
    * `observedAt` are snapshotted before vision runs; the image is passed to vision and
    * then dropped. Frames from an earlier generation are not sent to vision at all.
+   *
+   * `options.signal` lets the caller cancel (e.g. an HTTP request timeout or client
+   * disconnect). Once it aborts, the frame is never ingested, even if vision finishes.
    */
-  ingestFrame(sessionId: string, frame: FrameInput): Promise<CoordinatorResult<ScreenObservation>> {
+  ingestFrame(
+    sessionId: string,
+    frame: FrameInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CoordinatorResult<ScreenObservation>> {
     const t = this.#tasks.get(sessionId);
-    const work = this.#ingestFrame(sessionId, frame, t);
+    const work = this.#ingestFrame(sessionId, frame, t, options?.signal);
     if (t) {
       t.pending.add(work);
       void work.finally(() => t.pending.delete(work));
@@ -285,6 +311,7 @@ export class SidekickCoordinator {
     sessionId: string,
     frame: FrameInput,
     t: SessionTasks | undefined,
+    callerSignal?: AbortSignal,
   ): Promise<CoordinatorResult<ScreenObservation>> {
     const snap = this.engine.getSession(sessionId);
     if (!snap.ok || !t) return { ok: false, error: 'session_not_found' };
@@ -321,11 +348,20 @@ export class SidekickCoordinator {
     }
     if (!this.#vision) return { ok: false, error: 'vision_unavailable' };
 
-    const signal = t.period.controller.signal;
+    if (callerSignal?.aborted) return { ok: false, error: 'aborted' };
+    // Aborts on pause/end/discard (period) OR caller cancellation, whichever comes first.
+    const signal = callerSignal
+      ? AbortSignal.any([t.period.controller.signal, callerSignal])
+      : t.period.controller.signal;
     let description: unknown;
     try {
-      description = await this.#vision.describe(
-        { captureGeneration: generation, observedAt, image: frame.image, mimeType: frame.mimeType },
+      // Raced against the signal so cancellation returns immediately even if the adapter
+      // ignores `signal`; a late result from such an adapter is discarded.
+      description = await untilAborted(
+        this.#vision.describe(
+          { captureGeneration: generation, observedAt, image: frame.image, mimeType: frame.mimeType },
+          signal,
+        ),
         signal,
       );
     } catch {
