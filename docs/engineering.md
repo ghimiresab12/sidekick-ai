@@ -332,7 +332,7 @@ The Agent Builder export is integrated under `agent/`; the source and its entryp
 
 The shared runtime is pinned to Python 3.13 in `agent/.python-version`, `pyproject.toml`, CI, and Docker. The export did **not** include `uv.lock`; dependencies are still version ranges and are not yet exactly reproducible across installs. Generate and commit a lockfile when package-index access is available.
 
-**Integration status:** these findings are from the exported source and docs only. No real LiveKit or Chert session was run. The source does not contain a Chert adapter or Sidekick recommendation/overlay/review path. Chert screen-share frame shapes, transcript events, consent/lifecycle behavior, overlay delivery, and the product's selected voice action remain unverified. Do not present the exported LiveKit starter as a tested Chert integration.
+**Integration status:** the paragraph above describes the original export. The STT-only implementation described below now connects final transcripts to the existing HTTP bridge. Its SDK wiring and lifecycle have offline fake-SDK tests; no real LiveKit or Chert session was run during extraction. Chert screen-share frame shapes, transcript events, consent/lifecycle behavior, overlay delivery, and the product's selected voice action remain unverified. Do not present the exported LiveKit starter as a tested Chert integration.
 
 ### Gemini live smoke follow-up
 
@@ -785,7 +785,8 @@ STT stream across pause/resume and session replacement, and reject late finals f
 the old stream. This helper cannot determine which audio produced a final event.
 Keep room transcription publication and recording disabled, retain the single
 Chert connection greeting, and disable ongoing conversational replies. These
-LiveKit changes and real-call verification remain pending in Damius's entrypoint.
+LiveKit changes are now provided by the focused STT entrypoint below; real-call
+verification remains pending.
 
 On job shutdown, remove the callback and stop STT input first, then await
 `forwarder.close()`, then `bridge.close()` in a shutdown hook (also clean up failed
@@ -798,3 +799,49 @@ Run both host processes on the same machine using
 tokens; Python receives only the agent token and must not inherit
 `SIDEKICK_CONTROL_TOKEN`. Use mock Node reasoning and `SIDEKICK_VISION=none` for
 local verification. Direct aiohttp is required; no fallback client is introduced.
+
+
+### Focused LiveKit STT integration (offline-tested, live verification pending)
+
+Extracted from Damius's `3b525313837aa87cdbf817b643ea9d92212080bd`, without
+its incoming video adapter, synthetic avatar, PNG transport, media contracts or
+product changes. BridgeClient, TranscriptForwarder and all Node routes remain
+unchanged. The established quiet text and private-explanation product remains intact.
+
+`agent/src/agent.py` uses LiveKit Inference STT `deepgram/nova-3`, with no LLM.
+TTS `cartesia/sonic-3` is used only for one fixed `Sidekick connected.` greeting per
+job; input stays disabled until greeting playout completes, then output is disabled.
+There are no generated conversational replies. Room text input/output and SDK
+recording are explicitly disabled. STT/TTS use the existing LiveKit configuration;
+model/voice availability still requires account-level and real-call verification.
+
+`agent/src/stt_runtime.py` gates input using fresh BridgeClient state and replaces
+AgentSession objects across pause/resume, generation or session replacement. Final
+callbacks verify the CURRENT session/epoch/generation before calling the synchronous
+TranscriptForwarder method, which captures the exact context immediately. Retired
+callbacks cannot stamp old speech with new capture metadata. Consent is rechecked
+after asynchronous session creation, before enabling input. Startup is single-flight;
+shutdown revokes callbacks and awaits tracked startup, watcher and retiring-session
+tasks. Job cleanup closes runtime, forwarder and bridge even on initialization failure.
+Only exception type names are logged; transcripts and credentials are never logged
+by this adapter. SDK/provider logging behavior still needs verification in a live test.
+
+BridgeClient polls every 0.25 seconds, failing closed after 0.75 seconds without fresh
+state; the runtime checks every 0.25 seconds. Operator pause may therefore precede
+local STT cutoff by polling/watcher latency (or an in-progress SDK operation). The
+Node bridge independently gates acceptance. Already transmitted POSTs cannot be
+recalled, and sends are never retried. Call shutdown before discard to avoid the
+client's intentional replacement-session registration; any replacement needs fresh
+operator consent. Python must never receive SIDEKICK_CONTROL_TOKEN.
+
+Run both host processes on the same machine for localhost, with Node mock reasoning
+and vision disabled. The Python agent receives SIDEKICK_BRIDGE_URL and
+SIDEKICK_AGENT_TOKEN alongside LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.
+A trusted SSH loopback tunnel is an alternative; do not expose the bridge publicly.
+
+There is NO inbound or outbound video path in this extraction. It is unverified
+whether Chert's Video call readiness requires an outgoing video track. If removing
+the avatar prevents joining, report that as a live blocker and review the minimal
+video prerequisite separately; do not silently restore it. The fixed audio greeting
+is preserved, but Chert acknowledgement and line_unacknowledged recovery remain
+external integration risks. This milestone proves no screen ingestion or advice card.
