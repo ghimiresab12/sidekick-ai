@@ -114,7 +114,7 @@ A permissioned Chrome extension remains **a contingency only** if the verified C
 - **No new dependencies** in this integration. No UI kit, state library, router or network client.
 - **Private voice:** browser `speechSynthesis`, **on-device voices only** (`localService === true`); otherwise a labeled text fallback. The overlay and every backend module it bundles contain no WebRTC, media-capture, LiveKit/Chert, network or Gemini code (enforced by `overlay/src/privacyBoundary.test.ts`).
 - **Still requires live testing (CH-4):** acoustic pickup through speakers, OS-level screen-share audio capture, and user-gesture rules on the target device.
-- **Integration seam:** `overlay/src/backend/SidekickBackend.ts`. An HTTP/SSE implementation is needed once the local bridge lands on main; proposed routes are in `overlay/README.md`.
+- **Integration seam:** `overlay/src/backend/SidekickBackend.ts`. A live implementation is needed once the overlay-facing backend API is agreed with the backend developer (pending); requirements are in `overlay/README.md` and `docs/overlay-live-backend.md`.
 
 ## Decision update — private explanation (confirmed 2026-11-14)
 

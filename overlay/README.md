@@ -52,7 +52,7 @@ Tick **Simulate speech synthesis unavailable** to see the text fallback.
 | Local speech | Browser `speechSynthesis`, on-device voices only |
 | Session review | Rule-based summary of the **real engine timeline**. No backend review service exists yet |
 | Input | **Synthetic**: two scripted observations (`backend/inProcessBackend.ts`) |
-| HTTP/SSE bridge to a separate backend process | **Not on main.** Adapter not written yet (see "Bridge requirements") |
+| Overlay-facing backend API | **Not defined yet, pending agreement with the backend developer.** The bridge on main serves the agent and control side only. See "Live backend requirements" |
 | Chert / FaceTime input | **Not connected** |
 | Private playback verified isolated from the call | **Not yet tested live** (CH-4) |
 
@@ -119,26 +119,30 @@ None of these change an existing shared type. Each is additive.
 4. **Activity confirmation.** The overlay has no "confirm activity" control yet. The in-process setup
    confirms `gaming`, and `OverlayState.suggestedActivity` is shown when present.
 
-## Bridge requirements (for the local HTTP/SSE bridge, not on main)
+## Live backend requirements (contract pending)
 
-The overlay needs one more `SidekickBackend` implementation over HTTP. To keep a single contract, the bridge
-should send **shared types unchanged**, not a translated legacy view, and call the coordinator for lifecycle
-and input:
+**The overlay-facing API is not defined yet.** It is pending agreement with the backend developer, and no
+live adapter will be written until it is agreed. This section lists capabilities only, with no routes,
+methods, payloads, event names, authentication or error formats.
 
-| Port operation | Proposed bridge route | Backend call |
-|---|---|---|
-| `connect` | `GET /api/session/stream` (SSE, `data:` = `OverlayState`) | `engine.subscribe` |
-| `startSession` … `discardSession` | `POST /api/session/{start,pause,resume,end,discard}` | `coordinator.*` |
-| `dismiss` | `POST /api/session/dismiss {recommendationId}` | `engine.dismiss` |
-| `requestExplanation` | `POST /api/session/voice {recommendationId}` → `ExplanationScript` | `engine.requestExplanation` + text |
-| `reportVoiceStatus` | `POST /api/session/voice-status {requestId, status}` | `engine.reportVoiceStatus` |
-| `cancelExplanation` | `POST /api/session/voice-cancel {requestId}` | `engine.cancelExplanation(…, 'user')` |
-| `getTimeline` | `GET /api/session/timeline` → `{ events, truncated }` | `engine.getTimeline` |
+The HTTP bridge on main (`docs/engineering.md` "Integration milestone 2") is agent- and control-facing: it
+refuses browser requests, and its control token must never be in browser code. A live overlay therefore needs
+an overlay-facing API that can:
 
-Errors as `{ error: EngineError }`. The UI already handles `reconnecting` / `unavailable`, drops snapshots
-whose `version` does not increase, disables actions while disconnected and never shows the last state as live.
-The bridge should require `Content-Type: application/json` and check `Origin`, so other websites cannot
-drive it.
+- attach the overlay to an existing session as a specific participant;
+- deliver versioned `OverlayState` (shared type, unchanged) and recover after a disconnect;
+- run lifecycle actions the overlay is allowed to trigger;
+- dismiss a recommendation;
+- return explanation text **only to the requester**, never on a shared channel;
+- accept voice status and cancellation by request ID;
+- provide the session review (and, if agreed, the timeline).
+
+The UI already handles `reconnecting` / `unavailable`, drops snapshots whose `version` does not increase,
+disables actions while disconnected and never shows the last state as live. The in-process mock stays for
+tests and demos.
+
+Findings, open questions and the implementation sequence are in
+[`docs/overlay-live-backend.md`](../docs/overlay-live-backend.md).
 
 ## Privacy boundary for voice
 
