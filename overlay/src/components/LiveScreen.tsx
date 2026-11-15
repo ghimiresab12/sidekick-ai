@@ -1,8 +1,10 @@
+import type { SetupControls } from '../backend/SidekickBackend';
 import type { OverlayState } from '../contracts/shared';
 import { allCards, countEarlierAdvice, selectHistory, selectMainCard } from '../session/selectors';
 import type { SessionCommand } from '../session/sessionMachine';
 import type { PendingAction } from '../session/sessionReducer';
 import type { VoiceApi } from '../voice/useVoiceExplanation';
+import { ActivityConfirmation, needsActivityConfirmation } from './ActivityConfirmation';
 import { RecommendationCard } from './RecommendationCard';
 import { RecommendationHistory } from './RecommendationHistory';
 import { StatusBar } from './StatusBar';
@@ -16,6 +18,8 @@ interface Props {
   allowed: (cmd: SessionCommand) => boolean;
   /** Bridge mode: resume is operator-only, so no Resume button is offered. */
   operatorResumes: boolean;
+  /** Bridge-only setup controls; used here for "Confirm gaming" when consent came first. */
+  setup: SetupControls | undefined;
   voice: VoiceApi;
   onPause: () => void;
   onResume: () => void;
@@ -47,6 +51,12 @@ export function LiveScreen(props: Props) {
         onResume={props.onResume}
         onRequestEnd={props.onRequestEnd}
       />
+
+      {needsActivityConfirmation(overlay, props.setup) && (
+        <section className="panel activity-panel" aria-label="Activity confirmation">
+          <ActivityConfirmation overlay={overlay} setup={props.setup!} disabled={!live} />
+        </section>
+      )}
 
       {speakingRec && (
         <div className="now-playing" role="status">

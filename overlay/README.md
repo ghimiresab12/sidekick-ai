@@ -36,14 +36,17 @@ node overlay/scripts/bridge-demo.mjs          # prints a one-time pairing URL; t
 
 1. Open the printed `http://127.0.0.1:8787/ui/#pair=…` URL within 2 minutes. The code is removed from the
    address bar; a reload recovers the session from the HttpOnly cookie.
-2. The overlay shows **Waiting for the operator** (no consent button). Add a participant if you like, then
-   **Confirm gaming** (or type `gaming`).
-3. Type `consent` (the operator attests that everyone agreed). The overlay switches to **Observing**.
+2. The overlay shows **Waiting for the operator** (no consent button). Add a participant if you like.
+3. Type `consent` (the operator attests that everyone agreed). The overlay switches to **Observing**. Consent
+   does not confirm the activity: **Confirm gaming** stays on screen until you press it (or type `gaming`).
+   It can also be confirmed before consent; no advice appears until it is.
 4. Type `role`, then `frame`. **Left defense appears exposed** appears silently with Alex's role and evidence.
 5. **Explain with voice** speaks the bridge's explanation on this device only. Try **Stop voice**.
 6. **Pause** in the overlay: speech stops and the card becomes earlier advice. There is no Resume button;
    type `resume` (operator). Type `frame` again for fresh evidence.
 7. Type `drop` to cut every connection: the overlay shows **Reconnecting**, disables actions, and recovers.
+   If an explanation was playing, it stops, the bridge records it as failed, and a new explanation works as
+   soon as the overlay is reconnected.
 8. **End session**, **Generate review**, then **Discard session**. Afterwards the overlay asks for a new pairing
    link.
 
@@ -81,7 +84,7 @@ contain it. Tick **Simulate speech synthesis unavailable** to see the text fallb
 | Reconnection | Browser retry, then cookie check and backoff; actions disabled while disconnected |
 | Inputs in testing | **Synthetic** (demo harness). Python agent and Chert **not connected** |
 | Private playback isolated from the call | **Not yet tested live** (CH-4) |
-| Overlay CI job | **Not set up** (needs the CI owner) |
+| Overlay CI | `.github/workflows/overlay.yml`: typecheck, tests, production build |
 
 ## Architecture
 
@@ -138,6 +141,9 @@ receives `ExplanationContext` (it contains transcript text). The only overlay-de
 - Sound starts only from **Explain with voice**, scoped to one recommendation and one engine voice request.
 - Speech stops on Stop, dismiss of that card, pause, end, discard, connection loss, unmount, tab close,
   whenever the engine drops or replaces `activeVoiceRequest`, and when the bridge refuses a playback report.
+- If the connection drops mid-explanation, speech stops and the request is reported `failed`, re-sent after
+  reconnect if needed, so the bridge never keeps it live (which would block explanations with `voice_busy`).
+  Reconnecting never restarts speech.
 
 **Must be tested live (CH-4):**
 

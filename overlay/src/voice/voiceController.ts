@@ -17,6 +17,17 @@
  * Rules: one explanation at a time across ALL cards; explain() is ignored while
  * busy; a token invalidates late async results after stop/reset; if the backend refuses
  * the `playing_locally` report (request already over, or a 409), playback stops.
+ *
+ * Terminal reports are ACKNOWLEDGED, not fire-and-forget. A request stays live on the
+ * backend until it hears `finished`/`failed`/cancel (or its 60 s timeout), and a live
+ * request blocks every other explanation in the session (`voice_busy`). So every terminal
+ * report (finish, failure, Stop, a late request after Stop, connection loss) goes through
+ * `settle()`: it is re-sent after a reconnect while the backend still shows that request
+ * as active, and dropped once the backend accepts it or refuses it (404/409: already over).
+ *
+ * Connection loss (`interruptForConnectionLoss`): speech stops immediately and the request
+ * is reported `failed` (playback did not complete). If that report cannot get through, it
+ * is re-sent from `connectionRestored()` with the reconnect snapshot.
  */
 import type { ExplanationScript } from '../contracts/shared';
 import type { VoiceRequestStatus } from '../contracts/shared';
@@ -57,9 +68,6 @@ export const IDLE_VOICE_STATE: VoiceState = {
 
 export const isVoiceBusy = (s: VoiceState) => s.status === 'preparing' || s.status === 'speaking';
 
-/** Fire-and-forget backend report: a failed report must never break local playback. */
-const quietly = (p: Promise<void>) => void p.catch(() => {});
-
 /**
  * True when the backend REFUSED a report (as opposed to being unreachable): e.g.
  * `voice_request_not_found` (the explanation is already over) or a 409. The explanation
@@ -68,9 +76,15 @@ const quietly = (p: Promise<void>) => void p.catch(() => {});
 const isRefusal = (e: unknown) =>
   typeof e === 'object' && e !== null && 'code' in e && (e as { code: unknown }).code !== 'unavailable';
 
+export const CONNECTION_LOST_REASON =
+  'The connection to Sidekick was lost, so the explanation stopped. You can request it again once reconnected.';
+
 export function createVoiceController(deps: VoiceControllerDeps) {
   let state: VoiceState = IDLE_VOICE_STATE;
   let token = 0;
+  /** Terminal reports the backend has not yet acknowledged, by request id. */
+  const unacked = new Map<string, () => Promise<void>>();
+  const inFlight = new Set<string>();
   /** True once OverlayState has shown our request as active (see syncActiveRequest). */
   let seenActive = false;
   const listeners = new Set<() => void>();
@@ -79,6 +93,29 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     state = next;
     listeners.forEach((l) => l());
   };
+
+  /** Sends one terminal report and keeps it until the backend accepts or refuses it. */
+  async function flush(requestId: string): Promise<void> {
+    const send = unacked.get(requestId);
+    if (!send || inFlight.has(requestId)) return;
+    inFlight.add(requestId);
+    try {
+      await send();
+      unacked.delete(requestId);
+    } catch (e) {
+      if (isRefusal(e)) unacked.delete(requestId); // the backend no longer holds it live
+      // Unreachable: kept, and re-sent by connectionRestored() if still active there.
+    } finally {
+      inFlight.delete(requestId);
+    }
+  }
+  const settle = (requestId: string, send: () => Promise<void>) => {
+    unacked.set(requestId, send);
+    void flush(requestId);
+  };
+  const settleStatus = (requestId: string, status: 'finished' | 'failed') =>
+    settle(requestId, () => deps.reportStatus(requestId, status));
+  const settleCancel = (requestId: string) => settle(requestId, () => deps.cancel(requestId));
 
   const fail = (id: string, reason: string, script: ExplanationScript | null) =>
     set({
@@ -105,12 +142,12 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     }
     const requestId = script.request.id;
     if (mine !== token) {
-      // Stopped while preparing: the engine created a request we will never play.
-      quietly(deps.cancel(requestId));
+      // Stopped (or disconnected) while preparing: the engine created a request we will never play.
+      settleCancel(requestId);
       return;
     }
     if (script.request.recommendationId !== recommendationId) {
-      quietly(deps.reportStatus(requestId, 'failed'));
+      settleStatus(requestId, 'failed');
       fail(recommendationId, 'Received an explanation for a different recommendation; not playing it.', null);
       return;
     }
@@ -118,7 +155,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     const player = deps.isSpeechAvailable() ? deps.getPlayer() : null;
     if (!player) {
       fail(recommendationId, 'Speech synthesis is not available in this browser. Showing the explanation as text.', script);
-      quietly(deps.reportStatus(requestId, 'failed'));
+      settleStatus(requestId, 'failed');
       return;
     }
 
@@ -131,7 +168,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
         'No on-device voice was found. Sidekick does not use network voices, so the explanation is shown as text.',
         script,
       );
-      quietly(deps.reportStatus(requestId, 'failed'));
+      settleStatus(requestId, 'failed');
       return;
     }
 
@@ -147,20 +184,20 @@ export function createVoiceController(deps: VoiceControllerDeps) {
         if (mine !== token) return;
         token += 1;
         set({ status: 'finished', recommendationId, requestId, script, fallback: null });
-        quietly(deps.reportStatus(requestId, 'finished'));
+        settleStatus(requestId, 'finished');
       },
       // Interrupted by something other than our own Stop: playback did not complete.
       onInterrupted: () => {
         if (mine !== token) return;
         token += 1;
         fail(recommendationId, 'Voice playback was interrupted. Showing the explanation as text.', script);
-        quietly(deps.reportStatus(requestId, 'failed'));
+        settleStatus(requestId, 'failed');
       },
       onError: (detail) => {
         if (mine !== token) return;
         token += 1;
         fail(recommendationId, `Voice playback failed (${detail}). Showing the explanation as text.`, script);
-        quietly(deps.reportStatus(requestId, 'failed'));
+        settleStatus(requestId, 'failed');
       },
     });
   }
@@ -178,7 +215,7 @@ export function createVoiceController(deps: VoiceControllerDeps) {
   /** Stop Voice (user): silence now and tell the engine (`cancelExplanation`, reason user). */
   function stop(): void {
     const requestId = silenceLocally();
-    if (requestId) quietly(deps.cancel(requestId));
+    if (requestId) settleCancel(requestId);
   }
 
   /** Stop only if the given card is the one being explained (used on dismiss). */
@@ -209,11 +246,47 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     if (seenActive) silenceLocally();
   }
 
+  /**
+   * The live connection to the backend was lost. Speech must not continue on a state that
+   * may be out of date, and the backend must not keep the request live (it would block
+   * every explanation in the session). Stops speech now, shows the text, and reports the
+   * playback as `failed` (it did not complete). If the report cannot get through, it is
+   * re-sent from `connectionRestored()`. A request still being prepared is invalidated:
+   * when its late reply arrives, it is cancelled (see explain()).
+   */
+  function interruptForConnectionLoss(): void {
+    if (!isVoiceBusy(state)) return;
+    const { recommendationId, script } = state;
+    const requestId = silenceLocally();
+    if (!requestId || !recommendationId) return;
+    set({
+      status: 'failed',
+      recommendationId,
+      requestId,
+      script,
+      fallback: { reason: CONNECTION_LOST_REASON, text: script?.text ?? null },
+    });
+    settleStatus(requestId, 'failed');
+  }
+
+  /**
+   * The live connection is back; `active` is the backend's current `activeVoiceRequest`.
+   * Re-sends any unacknowledged terminal report for a request the backend still holds live,
+   * and forgets the ones it has already ended. Never restarts speech.
+   */
+  function connectionRestored(active: { requestId: string } | undefined): void {
+    for (const requestId of [...unacked.keys()]) {
+      if (active?.requestId === requestId) void flush(requestId);
+      else unacked.delete(requestId);
+    }
+  }
+
   /** Silence and forget everything without reporting (session discarded / unmount). */
   function reset(): void {
     token += 1;
     if (isVoiceBusy(state)) deps.getPlayer()?.cancel();
     seenActive = false;
+    unacked.clear();
     set(IDLE_VOICE_STATE);
   }
 
@@ -223,7 +296,11 @@ export function createVoiceController(deps: VoiceControllerDeps) {
     stopIfFor,
     silenceForLifecycle,
     syncActiveRequest,
-    cancelOnBackend: (requestId: string) => quietly(deps.cancel(requestId)),
+    interruptForConnectionLoss,
+    connectionRestored,
+    cancelOnBackend: (requestId: string) => settleCancel(requestId),
+    /** Request ids whose terminal report the backend has not acknowledged yet (tests, diagnostics). */
+    pendingReports: () => [...unacked.keys()],
     reset,
     getState: () => state,
     subscribe(listener: () => void) {
@@ -236,3 +313,18 @@ export function createVoiceController(deps: VoiceControllerDeps) {
 }
 
 export type VoiceController = ReturnType<typeof createVoiceController>;
+
+/**
+ * The connection → voice rule App.tsx applies on every change of connection health or of the
+ * backend's `activeVoiceRequest`: connection lost → stop speech and report the interruption;
+ * connection back → re-send any unacknowledged report for a request the backend still holds.
+ */
+export function syncVoiceWithConnection(
+  controller: Pick<VoiceController, 'interruptForConnectionLoss' | 'connectionRestored'>,
+  live: boolean,
+  active: { requestId: string } | undefined,
+): void {
+  if (!live) controller.interruptForConnectionLoss();
+  else controller.connectionRestored(active);
+}
+

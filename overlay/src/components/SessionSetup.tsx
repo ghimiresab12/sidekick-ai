@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { errorMessage, type BrowserParticipant, type SetupControls } from '../backend/SidekickBackend';
 import type { OverlayState } from '../contracts/shared';
+import { ActivityConfirmation } from './ActivityConfirmation';
 
 interface Props {
   setup: SetupControls;
@@ -16,7 +17,7 @@ interface Props {
 export function SessionSetup({ setup, overlay, disabled }: Props) {
   const [participants, setParticipants] = useState<BrowserParticipant[] | null>(null);
   const [name, setName] = useState('');
-  const [busy, setBusy] = useState<'add' | 'activity' | null>(null);
+  const [busy, setBusy] = useState<'add' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<string | null>(null);
   const nameId = useId();
@@ -42,19 +43,6 @@ export function SessionSetup({ setup, overlay, disabled }: Props) {
       setParticipants((prev) => [...(prev ?? []), p]);
       setAdded(p.displayName);
       setName('');
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const confirmGaming = async () => {
-    if (busy) return;
-    setBusy('activity');
-    setError(null);
-    try {
-      await setup.confirmGaming();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -104,13 +92,7 @@ export function SessionSetup({ setup, overlay, disabled }: Props) {
       )}
 
       <h2 className="setup-title">Activity</h2>
-      {overlay.activityConfirmed ? (
-        <p className="small">Gaming confirmed.</p>
-      ) : (
-        <button type="button" className="btn btn-small" onClick={() => void confirmGaming()} disabled={disabled || busy !== null}>
-          {busy === 'activity' ? 'Confirming…' : 'Confirm gaming'}
-        </button>
-      )}
+      <ActivityConfirmation overlay={overlay} setup={setup} disabled={disabled} />
       {error && (
         <p className="error-text small" role="alert">
           {error}

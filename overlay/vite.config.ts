@@ -1,6 +1,24 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, type Plugin } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
+
+const browserCrypto = fileURLToPath(new URL('./src/backend/browserCrypto.ts', import.meta.url));
+
+/**
+ * The in-process simulation bundles src/engine.ts, whose only Node import is `randomUUID`
+ * from `node:crypto`. Map exactly that import to Web Crypto. Scoped to engine.ts so the
+ * bridge modules a Node-side integration test loads keep the real `node:crypto`.
+ */
+function engineBrowserCrypto(): Plugin {
+  return {
+    name: 'sidekick-engine-browser-crypto',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (source === 'node:crypto' && importer?.replace(/\\/g, '/').endsWith('/src/engine.ts')) return browserCrypto;
+      return null;
+    },
+  };
+}
 
 /**
  * Modes:
@@ -14,13 +32,9 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig(({ mode }) => {
   const bridgePort = (process.env.SIDEKICK_BRIDGE_PORT ?? '').trim() || '8787';
   return {
-    plugins: [react()],
+    plugins: [engineBrowserCrypto(), react()],
     base: '/ui/',
     define: { __SIDEKICK_SIMULATION__: JSON.stringify(mode === 'simulation') },
-    resolve: {
-      // The in-process simulation bundles src/engine.ts; its only Node import is randomUUID.
-      alias: { 'node:crypto': fileURLToPath(new URL('./src/backend/browserCrypto.ts', import.meta.url)) },
-    },
     build: { sourcemap: false },
     server: {
       port: 5173,
