@@ -148,3 +148,13 @@ environment setting, not a hardcoded default. This test does not establish produ
 - `npm run typecheck` now runs two checks: `tsc -p tsconfig.json --noEmit` (engine, coordinator, tests) and `tsc -p tsconfig.reasoning-compat.json`. The second type-checks Prabin's `.mts` reasoning modules together with `tests/integration/reasoning-wiring.mts`, without emitting or modifying them.
 - `npm run test:all` runs the compiled engine and integration suite (`npm test`) and then the reasoning suite (`npm run test:reasoning`).
 - No new dependencies.
+
+### Gemini vision implementation
+
+`src/adapters/model/gemini-vision.mts` uses built-in Node fetch and inline image
+bytes with Gemini generateContent REST. The selected model remains explicit in
+the server environment. No image-processing SDK, runtime dependency, Files API,
+database, or Chert method is added. Synthetic PNG fixtures use Node zlib.
+The `Reasoning and vision` workflow runs Node 24 typechecks, engine/coordinator/
+reasoning tests and the offline vision demo without credentials or live API calls.
+See [vision.md](vision.md) for the controlled-scene profile and limitations.
