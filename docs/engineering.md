@@ -415,7 +415,32 @@ The engine admits `observedAt` up to `maxClockSkewMs` (5 s) ahead of its clock. 
 
 **Proposed for Prabin's approval (smallest change):** add an optional `maxClockSkewMs` to `ReasoningInput`, defaulting to `0` (today's behaviour). The future-evidence check would become `observedAt > now + maxClockSkewMs`, and freshness rules would be unchanged. The coordinator would pass `engine.config.maxClockSkewMs`, and the per-item exclusion and its skew-sized lag would no longer be needed. Until that is approved, reasoning behaviour is untouched.
 
-### Proposed vision interface (for Prabin's approval)
+### Vision interface (accepted for Gemini implementation)
+
+The implementation uses the existing `VisionPort` unchanged. `createGeminiVision` in
+`src/adapters/model/gemini-vision.mts` accepts an explicit `controlled-soccer-v1`
+profile: a top-down rectangular field, screen-left third outlined in yellow,
+blue circular defenders and red circular opponents. "Uncovered" means no blue
+defender is visibly inside that zone. This is a controlled simulation rule, not
+general soccer tactics, player tracking, or a commercial-game profile.
+
+The model returns only scene/visibility/coverage enums. A local validator maps
+these to bounded canonical summaries and the existing two condition facts.
+Only a fully visible zone with assessable coverage produces `clear` evidence and
+both boolean facts. Partial, occluded, or unrelated scenes cannot produce an
+uncovered claim. Unknown coverage is omitted, never converted to `false`.
+Image text is untrusted data; names, scores and advice are not accepted from vision.
+Frames use inline image bytes with server-only credentials; no files API, URLs,
+raw-frame logging, retention, automatic retries, or mock fallback. Input sizes,
+image signatures, output sizes, cancellation and total request time are bounded.
+Signature checks are format screening, not a full image decoder.
+
+Reasoning now supports optional `maxClockSkewMs` (safe integer 0–5000, default 0).
+Only source `observedAt` gets this tolerance: engine-generated `receivedAt` must
+remain at or before `now`. Original timestamps and freshness windows are unchanged.
+The coordinator's existing clock-wait workaround remains until its owner adopts
+the option in selection and supersession together; this change does not silently
+remove it or alter shared ports. Future source times do not refresh older evidence.
 
 Frame admission is checked before invoking vision: timestamps must parse with the shared
 strict ISO parser and fall between session start minus configured clock skew and the
@@ -429,7 +454,8 @@ Invalid frames must cause zero vision calls. The clock-wait workaround remains u
 - `FrameInput = { captureGeneration, observedAt, image: Uint8Array, mimeType }`, held in memory only and never stored or logged.
 - `ScreenDescription = { summary, evidenceQuality, facts? }`, where `facts` should include `leftZoneVisible` and `leftZoneUncovered` for the MVP rule.
 
-The engine validates the description on ingest. It is not implemented; tests use a mock.
+The engine validates the description on ingest. The Gemini implementation and its synthetic-image
+live checks are documented in `docs/vision.md`; live Chert capture remains unverified.
 
 ### How the Python agent will connect (next milestone, not implemented)
 

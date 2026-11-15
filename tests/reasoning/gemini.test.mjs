@@ -64,6 +64,23 @@ test('network failures are sanitized', async () => {
   await assert.rejects(p.generate(input), /Gemini request failed or was cancelled/);
 });
 
+test('diagnostics report only bounded HTTP metadata', async () => {
+  const events = [];
+  const p = createGeminiProvider({ ...options(async () => new Response('private response', { status: 429 })), onDiagnostic: e => events.push(e) });
+  assert.equal((await reason(input, p)).error, 'provider_error');
+  assert.deepEqual(events, [{ code: 'http_error', status: 429 }]);
+});
+test('unknown provider finish reason cannot leak through diagnostics', async () => {
+  const events = [];
+  const p = createGeminiProvider({ ...options(async () => Response.json(response('{}', 'private value'))), onDiagnostic: e => events.push(e) });
+  assert.equal((await reason(input, p)).error, 'provider_error');
+  assert.deepEqual(events, [{ code: 'incomplete_response' }]);
+});
+test('diagnostic callback failure does not change sanitized error', async () => {
+  const p = createGeminiProvider({ ...options(async () => new Response('', { status: 503 })), onDiagnostic() { throw Error('private'); } });
+  assert.equal((await reason(input, p)).error, 'provider_error');
+});
+
 test('provider schema avoids constraints rejected in the live smoke test', async () => {
   const p = createGeminiProvider(options(async (url, init) => {
     const schema = JSON.parse(init.body).generationConfig.responseJsonSchema;

@@ -124,6 +124,6 @@ and recorded verification; do not treat mock output as live Gemini or Chert proo
 - [x] Coordinator connects the engine and the reasoning module **in-process, with mocks only** (`npm run test:all`).
 - [ ] Authenticated localhost HTTP bridge (next milestone).
 - [ ] Python agent: listen-only mode, transcripts, screen-share frame sampling. Damius must check the APIs against the LiveKit docs and a real Chert call.
-- [ ] Vision adapter (Prabin), using the proposed `VisionPort`.
-- [ ] Prabin to decide on the proposed `maxClockSkewMs` reasoning input.
+- [x] Vision adapter (Prabin), using the existing `VisionPort`; controlled synthetic images tested with real Gemini. Real Chert frames still unverified. See `vision.md`.
+- [x] Optional `maxClockSkewMs` implemented in reasoning (0–5000 ms, default 0); coordinator adoption still pending with Sabik.
 - **Blocker:** a real Chert call must confirm whether the connection greeting is mandatory and whether screen share reaches the agent (the CH-2 proof).

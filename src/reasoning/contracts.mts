@@ -58,6 +58,8 @@ export interface ReasoningInput {
   now: string;
   /** Pass EngineConfig.staleAfterMs; there is deliberately no production default. */
   staleAfterMs: number;
+  /** Source-clock tolerance only, 0–5000 ms; default 0. Never shifts timestamps. */
+  maxClockSkewMs?: number;
 }
 export interface EvidenceQuote { observationId: string; quote: string }
 interface ProposalBase {
