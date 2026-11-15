@@ -4,10 +4,10 @@
  * `useSyncExternalStore` lets React read state that lives outside React (the
  * controller) and re-render whenever it changes — no duplicated useState.
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { SidekickBackend } from '../backend/SidekickBackend';
 import { createSpeechPlayer, getBrowserSpeech, loadVoices, pickLocalVoice, type SpeechPlayer } from './speechService';
-import { createVoiceController, isVoiceBusy } from './voiceController';
+import { createVoiceController, isVoiceBusy, syncVoiceWithConnection } from './voiceController';
 
 export interface VoiceOptions {
   /** Mock/demo toggle to exercise the text fallback path. */
@@ -42,6 +42,10 @@ export function useVoiceExplanation(backend: SidekickBackend, options: VoiceOpti
   });
 
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
+  const syncConnection = useCallback(
+    (live: boolean, active: { requestId: string } | undefined) => syncVoiceWithConnection(controller, live, active),
+    [controller],
+  );
 
   // Never leave speech playing when the UI goes away (unmount, tab close).
   useEffect(() => {
@@ -61,6 +65,10 @@ export function useVoiceExplanation(backend: SidekickBackend, options: VoiceOpti
     stopIfFor: controller.stopIfFor,
     silenceForLifecycle: controller.silenceForLifecycle,
     syncActiveRequest: controller.syncActiveRequest,
+    interruptForConnectionLoss: controller.interruptForConnectionLoss,
+    connectionRestored: controller.connectionRestored,
+    /** See `syncVoiceWithConnection`. */
+    syncConnection,
     cancelOnBackend: controller.cancelOnBackend,
     reset: controller.reset,
   };

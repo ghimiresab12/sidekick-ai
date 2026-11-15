@@ -2,7 +2,17 @@
  * Pure recommendation lifecycle rules. No I/O, no clock — callers pass `nowMs`.
  * Kept separate from the engine so the rules can be unit-tested directly.
  */
-import type { Recommendation, RecommendationStatus } from '../contracts/types.js';
+import type { Recommendation, RecommendationStatus, ScreenObservation } from '../contracts/types.js';
+
+/** Domain predicate only; the coordinator/engine enforce time, generation and lifecycle. */
+export type ResolutionRule = (recommendation: Recommendation, observation: ScreenObservation) => boolean;
+
+/** The only automatic resolution rule enabled by the production bridge. No prose inference. */
+export const controlledSoccerResolution: ResolutionRule = (rec, screen) =>
+  rec.fingerprint === 'left_defense_uncovered' &&
+  screen.evidenceQuality === 'clear' &&
+  screen.facts?.leftZoneVisible === true &&
+  screen.facts.leftZoneUncovered === false;
 
 export type ProposalDecision =
   | { kind: 'create' }

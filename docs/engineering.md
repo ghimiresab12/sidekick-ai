@@ -143,11 +143,12 @@ Restating the current role refreshes the ordering without creating an event. Ign
    - `now − lastConditionAt > staleAfterMs` (checked on every ingest, propose, `sweepStale` and `sweepAll`);
    - the session pauses or ends;
    - a related participant's role changes (`role_changed`) or the related goal is retired (`goal_changed`).
-7. `resolve` requires an observation whose source time is strictly newer than `lastConditionAt`.
+7. `resolve` requires fresh, already-eligible, clear screen evidence from the current capture generation, strictly newer than `lastConditionAt`. The production coordinator enables the controlled-soccer rule for `left_defense_uncovered`: only active cards resolve, and only when the newest eligible screen shows `leftZoneVisible === true` and `leftZoneUncovered === false`. Every screen tied at that newest timestamp must agree; missing facts or uncertain quality prevent resolution. Stale cards are left unchanged. This runs before asynchronous reasoning, including when future-stamped observations become eligible. The engine records the resolving observation ID and rejects subsequent same-fingerprint proposals whose newest condition evidence is at or before a resolution in the current generation, even after cooldown expires.
 
 **Voice requests.** `requestExplanation` creates a request with a unique ID; only one request per session can be live at a time (`voice_busy`). `reportVoiceStatus` accepts `playing_locally`, then `finished` or `failed`, and only for the current live request. Unknown IDs return `voice_request_not_found`; superseded or terminal IDs return `invalid_transition`. Playback can't start unless the session is active. Cancellation rules:
 - **Pause:** `cancelled` with reason `session_paused`.
 - **End:** `cancelled` with reason `session_ended`.
+- **Recommendation resolved:** a live explanation of that card is `cancelled` with reason `recommendation_resolved`, in the same engine operation as resolution; the overlay stops its local speech when the active request disappears.
 - **Stop button or disconnected client:** `cancelExplanation` with reason `user` or `client_disconnected`.
 - **No callback within `voiceRequestTimeoutMs`:** `cancelled` with reason `timeout`.
 - **Discard:** the request is abandoned with the session; later callbacks return `session_not_found`, and the discarding UI must stop its own playback.
@@ -728,10 +729,13 @@ No bridge, coordinator or shared-contract code was changed for this. Status of t
 2. **Explanation text: done.** The in-process simulation imports `src/explanations/explanation-text.ts`; `overlay/src/backend/explanationText.ts` is deleted. The simulation also applies `src/privacy/browser-projection.ts`, so both modes return the same browser shapes.
 3. **HTTP backend: done.** `overlay/src/backend/httpBackend.ts` implements `SidekickBackend` (pairing bootstrap, `GET /v1/ui/session` recovery, `EventSource`, the routes above). It is the default. The simulation is selected only by `vite --mode simulation`; the flag is a build-time constant, so the default build contains no engine, coordinator or reasoning code.
 4. **Build: done.** Vite `base` is `/ui/`, production source maps are off, and the dev server proxies `/v1` to the bridge (needs `SIDEKICK_UI_DEV_ORIGIN=http://localhost:5173`).
-5. **UI controls: done.** Participant registration (shows the returned normalized name and the 400/409 errors), "Confirm gaming", "Waiting for the operator" while `starting` with no consent button, Pause/End but no Resume button ("Paused — the operator resumes").
+5. **UI controls: done.** Participant registration (shows the returned normalized name and the 400/409 errors), "Confirm gaming", "Waiting for the operator" while `starting` with no consent button, Pause/End but no Resume button ("Paused — the operator resumes"). Consent and activity confirmation are separate states: "Confirm gaming" stays available in `starting`, `active` and `paused` until `OverlayState.activityConfirmed`, whichever comes first.
 6. **Voice: done.** Playback is reported by `request.id`. A refused `playing_locally` report (e.g. `404 voice_request_not_found` or a 409) stops speech locally with no retry; speech also stops when `activeVoiceRequest` disappears or changes.
+   - **Stream loss during playback:** the overlay stops speech and reports the request `failed` (`POST …/voice/:requestId/status`; playback did not complete). The bridge's own `client_disconnected` cancel only fires after `voiceDisconnectGraceMs` with no stream, so without this a quick reconnect left the request `playing_locally` and every explanation answered `409 voice_busy` until the 60 s engine timeout.
+   - **Terminal reports are acknowledged:** `finished`/`failed`/cancel are kept until the bridge accepts them or refuses them (404/409 = already over). One that could not get through is retried with a short bounded backoff (0.5–4 s), and re-sent after reconnect if the reconnect snapshot still shows that request as `activeVoiceRequest`; otherwise it is dropped. Reconnecting never restarts speech.
+   - No bridge or engine change was needed.
 7. **CSP: verified** with the production build served by the bridge in headless Chrome: no CSP violations.
-8. **CI: not done.** Still needs whoever owns CI.
+8. **CI: done.** `.github/workflows/overlay.yml` runs the overlay typecheck, tests and production build on pull requests and pushes to `main` (Node 24, `npm ci` with both lockfiles).
 
 **Verification:** overlay unit tests (fake fetch and `EventSource`) plus a headless-Chrome run against the production bridge runtime with mock reasoning, mocked Gemini vision HTTP and synthetic agent input (`overlay/scripts/bridge-demo.mjs`). Not tested with Chert, the Python agent or live Gemini. The session review is still built in the browser from `BrowserSessionTimeline` (rule-based; no backend review service).
 

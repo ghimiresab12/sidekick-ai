@@ -743,6 +743,33 @@ test('[S] one browser credential cannot exhaust the session stream limit', withU
 
 // ── Codex review: role allowlist, invisible names, terminal voice requests ──
 
+test('[resolution] production runtime: covered frame resolves over HTTP/SSE and cancels private voice', withUi({}, async (h) => {
+  const { id, ui, recId } = await h.cardReady();
+  const stream = await h.stream(id, ui.cookie);
+  try {
+    await stream.until(() => stream.states().some((s) => s.prominent?.id === recId));
+    const request = await h.http('POST', `/v1/sessions/${id}/recommendations/${recId}/explanation`, { cookie: ui.cookie });
+    const requestId = (request.body!.request as { id: string }).id;
+    assert.equal((await h.http('POST', `/v1/sessions/${id}/voice/${requestId}/status`, { cookie: ui.cookie, json: { status: 'playing_locally' } })).status, 200);
+    await stream.until(() => stream.states().some((s) => s.activeVoiceRequest?.status === 'playing_locally'));
+    const before = stream.states().at(-1)!.version;
+    h.setScene('covered');
+    const frame = await h.agentFrame(id, 9);
+    assert.equal(frame.status, 200);
+    await h.idle(id);
+    await stream.until(() => stream.states().some((s) => s.history.some((r) => r.id === recId && r.status === 'resolved')));
+    const state = stream.states().at(-1)!;
+    assert.ok(state.version > before);
+    assert.equal(state.prominent, undefined);
+    assert.equal(state.activeVoiceRequest, undefined);
+    assert.deepEqual([h.voice(id)[0]!.status, h.voice(id)[0]!.cancelReason], ['cancelled', 'recommendation_resolved']);
+    const timeline = await h.http('GET', `/v1/sessions/${id}/timeline`, { cookie: ui.cookie });
+    const events = timeline.body!.events as Array<{ type: string; recommendationId?: string; observationId?: string }>;
+    assert.ok(events.some((e) => e.type === 'recommendation_resolved' && e.recommendationId === recId && e.observationId === frame.body!.observationId));
+    assert.equal((await h.http('POST', `/v1/sessions/${id}/voice/${requestId}/cancel`, { cookie: ui.cookie })).status, 404);
+  } finally { stream.close(); }
+}));
+
 test('[R1] arbitrary alphabetic role text ("password banana") never reaches the browser; canonical roles do', withUi({}, async (h) => {
   const SECRET_ROLES = ['password banana', 'hunter two', 'my home address', 'the vault key'];
   const NAMES = ['Sam', 'Lee', 'Kim', 'Ola'];

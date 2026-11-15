@@ -292,6 +292,7 @@ export type VoiceCancelReason =
   | 'client_disconnected'
   | 'session_paused'
   | 'session_ended'
+  | 'recommendation_resolved'
   | 'timeout';
 
 export interface VoiceRequest {

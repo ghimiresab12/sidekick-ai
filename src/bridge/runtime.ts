@@ -13,6 +13,7 @@ import type { ReasoningFn, VisionPort } from '../coordinator/ports.js';
 import { loadBridgeConfig, type BridgeConfig } from './config.js';
 import { createBridge, type Bridge, type BridgeLogEntry, type BridgeOptions } from './http-bridge.js';
 import { StaticUiError } from './static-ui.js';
+import { controlledSoccerResolution } from '../recommendations/recommendation-rules.js';
 
 /** Configuration problem with a safe, credential-free message. */
 export class RuntimeConfigError extends Error {
@@ -89,6 +90,7 @@ export async function createBridgeRuntime(
     reasoning: reasoning.reasoning,
     ...(vision.vision ? { vision: vision.vision } : {}),
     conditionFactKeys: vision.conditionFactKeys,
+    resolutionRule: controlledSoccerResolution,
   });
   // Same-origin UI: explicit SIDEKICK_UI_DIR, else the repo's built overlay if present.
   const defaultUi = fileURLToPath(new URL('../../../overlay/dist', import.meta.url));
