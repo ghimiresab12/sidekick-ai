@@ -36,11 +36,12 @@ export function ConnectionBanner({
   detail: string | null;
   onRetry: () => void;
 }) {
-  if (status === 'connected' || status === 'connecting') return null;
+  // Rendered only once a state exists, so `connecting` here is a manual reconnect: say so.
+  if (status === 'connected') return null;
   return (
     <div className="banner-error" role="alert">
       <span>
-        {status === 'reconnecting'
+        {status === 'reconnecting' || status === 'connecting'
           ? 'Connection to Sidekick lost. Reconnecting… Showing the last known state; actions are paused.'
           : `Sidekick service unavailable. ${detail ?? ''} Showing the last known state; actions are disabled.`}
       </span>

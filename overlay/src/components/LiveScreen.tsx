@@ -75,6 +75,7 @@ export function LiveScreen(props: Props) {
           rec={main}
           live={live}
           voice={voice}
+          sessionVoiceBusy={overlay.voiceBusy}
           dismissing={pending === `dismiss:${main.id}`}
           dismissDisabled={pending !== null}
           onDismiss={props.onDismiss}

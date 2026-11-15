@@ -7,6 +7,8 @@ interface Props {
   rec: RecommendationView;
   live: boolean;
   voice: VoiceApi;
+  /** `OverlayState.voiceBusy`: the session's single live explanation slot is taken (any device). */
+  sessionVoiceBusy: boolean;
 }
 
 const STATUS_TEXT: Record<VoiceStatus, string> = {
@@ -23,7 +25,7 @@ const STATUS_TEXT: Record<VoiceStatus, string> = {
  * Sound only ever starts from this button press, never on card creation.
  * Whether Explain is offered is the ENGINE's decision (`RecommendationView.canExplain`).
  */
-export function VoiceControls({ rec, live, voice }: Props) {
+export function VoiceControls({ rec, live, voice, sessionVoiceBusy }: Props) {
   const noteId = useId();
   const mine = voice.state.recommendationId === rec.id;
   const status: VoiceStatus = mine ? voice.state.status : 'idle';
@@ -33,6 +35,8 @@ export function VoiceControls({ rec, live, voice }: Props) {
   let hint: string | null = null;
   if (!live) hint = 'Reconnect to the Sidekick service to request an explanation.';
   else if (voice.busy && !mine) hint = 'Another explanation is playing. Stop it first.';
+  else if (sessionVoiceBusy && !voice.busy && rec.status === 'active')
+    hint = 'Another explanation is in progress in this session (one at a time). You can ask once it ends.';
   else if (!rec.canExplain && !mine) hint = 'Voice explanations are available for open advice while Sidekick is observing.';
 
   return (

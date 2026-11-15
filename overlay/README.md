@@ -63,8 +63,8 @@ npm --prefix overlay run dev:simulation       # http://localhost:5173/ui/
 ```
 
 Runs the **real** engine, coordinator and reasoning (mock provider) **inside the page**, fed by a two-step
-synthetic feed (Demo controls → **Send next synthetic observation**). It uses the same browser projection
-and explanation text as the bridge. It is selected only by `--mode simulation`; the default build does not
+synthetic feed (Demo controls → **Send next synthetic observation**). It uses the same browser projection,
+explanation text and recommendation-resolution rule (`controlledSoccerResolution`) as the bridge runtime. It is selected only by `--mode simulation`; the default build does not
 contain it. Tick **Simulate speech synthesis unavailable** to see the text fallback.
 
 ## What is real, mocked or missing
