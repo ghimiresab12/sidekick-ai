@@ -256,7 +256,7 @@ describe('voice recovery after an SSE disconnection (real bridge ↔ overlay sea
     // 6. The interrupted request is ended on the server with the existing contract (failed).
     await until(() => t.serverVoice(first)?.status === 'failed', 'server: first request failed');
     await until(() => t.ui.state?.activeVoiceRequest === undefined && t.ui.state?.voiceBusy === false, 'no active request');
-    expect(t.controller.pendingReports()).toEqual([]);
+    await until(() => t.controller.pendingReports().length === 0, 'report acknowledged by the bridge');
     expect(t.sp.utterances).toHaveLength(1); // reconnecting never restarted speech
     await until(() => t.ui.state?.prominent?.canExplain === true, 'card explainable again');
 
@@ -308,7 +308,7 @@ describe('voice recovery after an SSE disconnection (real bridge ↔ overlay sea
     t.controller.stop();
     await until(() => t.serverVoice(id)?.status === 'cancelled', 'server: cancelled');
     expect(t.serverVoice(id)?.cancelReason).toBe('user');
-    expect(t.controller.pendingReports()).toEqual([]);
+    await until(() => t.controller.pendingReports().length === 0, 'report acknowledged by the bridge');
   });
 
   it('WITHOUT the fix (silence only, as before), the same sequence ends in voice_busy', async () => {
