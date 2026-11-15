@@ -2,10 +2,12 @@
  * In-process backend: the REAL session engine, SidekickCoordinator and reasoning
  * module (`src/`, unmodified), hosted in the page, fed with SYNTHETIC input.
  *
- * Why it exists: the local HTTP/SSE bridge is not on main yet, and the overlay needs
- * an offline mode for isolated frontend work and demos. Instead of the old
- * hand-written mock, which re-implemented lifecycle and card rules, this runs the
- * actual backend code, so the UI always sees exactly what the engine produces.
+ * DEVELOPMENT MODE ONLY. The live overlay uses `httpBackend` (the Node bridge owns the
+ * engine and session state). This exists for tests and offline demos, and is loaded only
+ * when explicitly selected (App.tsx, lazy import), so the live build contains no engine.
+ * It runs the actual backend code rather than a hand-written fake, and returns the same
+ * browser projections and explanation text as the bridge (`src/privacy/browser-projection.ts`,
+ * `src/explanations/explanation-text.ts`), so both modes show the same shapes.
  *
  * What is real here: lifecycle rules, capture generations, reasoning (deterministic
  * mock provider, never Gemini: no keys exist in the browser), coordinator abort and
@@ -18,11 +20,12 @@ import type { CoordinatorDiagnostic, ReasoningFn } from '../../../src/coordinato
 import { reason } from '../../../src/reasoning/reason.mts';
 import { createMockProvider } from '../../../src/adapters/model/mock.mts';
 import type { Result } from '../../../src/contracts/types';
-import type { ExplanationScript, SessionTimeline } from '../contracts/pending';
-import type { OverlayState } from '../contracts/shared';
-import { buildExplanationText } from './explanationText';
+import { buildExplanationText } from '../../../src/explanations/explanation-text';
+import { projectOverlayState, projectTimelineEvent, projectVoiceRequest } from '../../../src/privacy/browser-projection';
+import type { BrowserSessionTimeline, ExplanationScript, OverlayState } from '../contracts/shared';
 import {
   BackendError,
+  type BackendCapabilities,
   type BackendLabel,
   type BackendListener,
   type LocalVoiceStatus,
@@ -60,6 +63,8 @@ export const IN_PROCESS_LABEL: BackendLabel = {
   syntheticInput: true,
 };
 
+const IN_PROCESS_CAPABILITIES: BackendCapabilities = { consent: 'local', resume: true };
+
 function unwrap<T>(result: Result<T> | { ok: false; error: string; detail?: string }): T {
   if (result.ok) return (result as { ok: true; value: T }).value;
   const code = result.error as BackendError['code'];
@@ -81,13 +86,13 @@ export function createInProcessBackend(options: InProcessOptions = {}): Sidekick
   const now = options.now ?? (() => new Date());
 
   const sessionId = unwrap(coordinator.createSession()).id;
-  for (const displayName of PARTICIPANTS) unwrap(engine.addParticipant(sessionId, { displayName }));
-  // The real flow is "suggested automatically, confirmed by users"; the overlay has no
-  // confirm-activity control yet, so the synthetic setup confirms the MVP activity.
-  unwrap(engine.confirmActivity(sessionId, 'gaming'));
+  for (const displayName of PARTICIPANTS) unwrap(coordinator.addParticipant(sessionId, { displayName }));
+  // The synthetic setup confirms the MVP activity (the bridge mode has a "Confirm gaming" control).
+  unwrap(coordinator.confirmActivity(sessionId, 'gaming'));
 
   let feedIndex = 0;
   let discarded = false;
+  const discardListeners = new Set<() => void>();
 
   const live = () => {
     if (discarded) throw new BackendError('session_not_found');
@@ -117,6 +122,7 @@ export function createInProcessBackend(options: InProcessOptions = {}): Sidekick
 
   return {
     label: IN_PROCESS_LABEL,
+    capabilities: IN_PROCESS_CAPABILITIES,
 
     connect(listener: BackendListener) {
       if (discarded) {
@@ -125,8 +131,13 @@ export function createInProcessBackend(options: InProcessOptions = {}): Sidekick
       }
       listener.onConnection('connected');
       // The engine emits the current state when subscribe returns, then on every change.
-      const unsubscribe = unwrap(engine.subscribe(sessionId, (state: OverlayState) => listener.onState(state)));
-      return unsubscribe;
+      const unsubscribe = unwrap(engine.subscribe(sessionId, (state: OverlayState) => listener.onState(projectOverlayState(state))));
+      const onDiscarded = () => listener.onDiscarded?.();
+      discardListeners.add(onDiscarded);
+      return () => {
+        discardListeners.delete(onDiscarded);
+        unsubscribe();
+      };
     },
 
     async startSession() {
@@ -149,32 +160,39 @@ export function createInProcessBackend(options: InProcessOptions = {}): Sidekick
       live();
       unwrap(coordinator.discard(sessionId));
       discarded = true;
+      for (const notify of discardListeners) notify();
+      discardListeners.clear();
     },
 
     async dismiss(recommendationId) {
       live();
-      unwrap(engine.dismiss(sessionId, recommendationId));
+      unwrap(coordinator.dismiss(sessionId, recommendationId));
     },
 
     async requestExplanation(recommendationId): Promise<ExplanationScript> {
       live();
-      const { request, context } = unwrap(engine.requestExplanation(sessionId, recommendationId));
-      return { request, text: buildExplanationText(context), refersToEarlierObservation: context.isStale };
+      const { request, context } = unwrap(coordinator.requestExplanation(sessionId, recommendationId));
+      return { request: projectVoiceRequest(request), text: buildExplanationText(context), refersToEarlierObservation: context.isStale };
     },
     async reportVoiceStatus(requestId, status: LocalVoiceStatus) {
       live();
-      unwrap(engine.reportVoiceStatus(sessionId, requestId, status));
+      unwrap(coordinator.reportVoiceStatus(sessionId, requestId, status));
     },
     async cancelExplanation(requestId) {
       live();
-      unwrap(engine.cancelExplanation(sessionId, requestId, 'user'));
+      unwrap(coordinator.cancelExplanation(sessionId, requestId, 'user'));
     },
 
-    async getTimeline(): Promise<SessionTimeline> {
+    async getTimeline(): Promise<BrowserSessionTimeline> {
       live();
       const events = unwrap(engine.getTimeline(sessionId));
-      const truncated = unwrap(engine.getSession(sessionId)).timelineTruncated;
-      return { events, truncated };
+      const snap = unwrap(engine.getSession(sessionId));
+      // Same projection as the bridge: no goal or decision wording, rebuilt summaries, safe roles.
+      const lookup = {
+        names: new Map(snap.participants.map((p) => [p.id, p.displayName])),
+        titles: new Map(snap.recommendations.map((r) => [r.id, r.title])),
+      };
+      return { events: events.map((e) => projectTimelineEvent(e, lookup)), truncated: snap.timelineTruncated };
     },
 
     simulation: {

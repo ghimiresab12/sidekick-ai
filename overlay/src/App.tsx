@@ -6,10 +6,10 @@
  *   - End and Discard require confirmation;
  *   - screens follow the session lifecycle and connection health.
  *
- * The backend is chosen in `createBackend()`. Components never import one.
+ * The backend is chosen in `loadBackendFactory()`. Components never import one.
  */
 import { useEffect, useState } from 'react';
-import { createInProcessBackend } from './backend/inProcessBackend';
+import { createHttpBackend } from './backend/httpBackend';
 import { errorMessage, type SidekickBackend } from './backend/SidekickBackend';
 import { BackendBanner, DemoControls } from './components/BackendBanner';
 import { ConfirmDialog } from './components/ConfirmDialog';
@@ -27,12 +27,20 @@ import {
 import { useSidekickSession } from './session/useSidekickSession';
 import { useVoiceExplanation } from './voice/useVoiceExplanation';
 
+type BackendFactory = () => SidekickBackend;
+
 /**
- * Today: the in-process backend (real engine + coordinator + reasoning, synthetic
- * input). The HTTP/SSE bridge adapter plugs in here once the bridge is on main.
+ * Default: the Node bridge's browser API (the bridge owns all session state).
+ * `vite --mode simulation` selects the in-process simulation instead. The flag is a
+ * build-time constant, so in the default build this branch and its lazy import are
+ * removed and the live bundle contains no engine, coordinator or reasoning code.
  */
-function createBackend(): SidekickBackend {
-  return createInProcessBackend();
+async function loadBackendFactory(): Promise<BackendFactory> {
+  if (__SIDEKICK_SIMULATION__) {
+    const { createInProcessBackend } = await import('./backend/inProcessBackend');
+    return () => createInProcessBackend();
+  }
+  return () => createHttpBackend();
 }
 
 interface Instance {
@@ -41,6 +49,27 @@ interface Instance {
 }
 
 export function App() {
+  const [factory, setFactory] = useState<BackendFactory | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    loadBackendFactory().then(
+      (f) => setFactory(() => f),
+      (e: unknown) => setLoadError(errorMessage(e)),
+    );
+  }, []);
+  if (!factory) {
+    return (
+      <div className="app">
+        <main className="main">
+          {loadError ? <UnavailableScreen detail={loadError} onRetry={() => window.location.reload()} /> : <LoadingScreen />}
+        </main>
+      </div>
+    );
+  }
+  return <Sessions createBackend={factory} />;
+}
+
+function Sessions({ createBackend }: { createBackend: BackendFactory }) {
   const [instance, setInstance] = useState<Instance>(() => ({ n: 1, backend: createBackend() }));
   // `key` remounts everything for a new session, so no state leaks between sessions.
   return (
@@ -106,7 +135,7 @@ function SidekickApp({ backend, onRestart }: { backend: SidekickBackend; onResta
   let screen: JSX.Element;
   let wide = false;
   if (state.discarded) {
-    screen = <DiscardedScreen onRestart={onRestart} />;
+    screen = <DiscardedScreen onRestart={onRestart} needsNewPairing={backend.capabilities.consent === 'operator'} />;
   } else if (!overlay && state.connection === 'unavailable') {
     screen = <UnavailableScreen detail={state.connectionDetail} onRetry={session.reconnect} />;
   } else if (!overlay) {
@@ -116,6 +145,8 @@ function SidekickApp({ backend, onRestart }: { backend: SidekickBackend; onResta
       <ConsentScreen
         overlay={overlay}
         syntheticInput={backend.label.syntheticInput}
+        consent={backend.capabilities.consent}
+        setup={backend.setup}
         starting={state.pending === 'start'}
         disabled={!live}
         onStart={() => void session.start()}
@@ -155,6 +186,7 @@ function SidekickApp({ backend, onRestart }: { backend: SidekickBackend; onResta
         selectedId={state.selectedRecommendationId}
         pending={state.pending}
         allowed={session.allowed}
+        operatorResumes={!backend.capabilities.resume}
         voice={voice}
         onPause={() => void leaveActive(session.pause)}
         onResume={() => void session.resume()}

@@ -29,6 +29,8 @@ export function useSidekickSession(backend: SidekickBackend) {
       disconnect = backend.connect({
         onState: (overlay) => mounted && dispatch({ type: 'state_received', state: overlay }),
         onConnection: (status, detail) => mounted && dispatch({ type: 'connection_changed', status, detail }),
+        // The session was discarded (here or on another device): stop treating any state as live.
+        onDiscarded: () => mounted && dispatch({ type: 'session_discarded' }),
       });
     } catch (e) {
       dispatch({ type: 'connection_changed', status: 'unavailable', detail: errorMessage(e) });
@@ -57,7 +59,12 @@ export function useSidekickSession(backend: SidekickBackend) {
 
   const status = state.overlay?.status;
   const live = state.connection === 'connected';
-  const allowed = (command: SessionCommand) => live && !!status && !state.discarded && canRun(status, command);
+  const { capabilities } = backend;
+  /** Commands this page may send: lifecycle table, live connection, and what the backend lets a browser do. */
+  const permitted = (command: SessionCommand) =>
+    (command !== 'start' || capabilities.consent === 'local') && (command !== 'resume' || capabilities.resume);
+  const allowed = (command: SessionCommand) =>
+    live && !!status && !state.discarded && permitted(command) && canRun(status, command);
 
   function command(cmd: SessionCommand, work: () => Promise<void>) {
     return allowed(cmd) ? run(cmd, work) : Promise.resolve(false);
@@ -90,7 +97,7 @@ export function useSidekickSession(backend: SidekickBackend) {
         const timeline = await backend.getTimeline();
         const inputNote = backend.label.syntheticInput
           ? 'Synthetic inputs: no live Chert screen share or transcripts were processed.'
-          : undefined;
+          : 'Built from the events the local Sidekick bridge recorded; live Chert capture has not been verified.';
         const review = buildReview(timeline, overlayRef.current, { inputNote });
         dispatch({ type: 'review_succeeded', review, timeline });
       } catch (e) {

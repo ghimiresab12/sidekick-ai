@@ -64,7 +64,7 @@ export function ActionErrorBanner({ message, onClose }: { message: string; onClo
   );
 }
 
-export function DiscardedScreen({ onRestart }: { onRestart: () => void }) {
+export function DiscardedScreen({ onRestart, needsNewPairing }: { onRestart: () => void; needsNewPairing: boolean }) {
   return (
     <section className="panel center" aria-labelledby="discarded-title">
       <h1 id="discarded-title">Session discarded</h1>
@@ -72,9 +72,13 @@ export function DiscardedScreen({ onRestart }: { onRestart: () => void }) {
         This session’s recommendations and event history were cleared from memory. Its review is no longer available,
         and it cannot be resumed.
       </p>
-      <button type="button" className="btn btn-primary" onClick={onRestart}>
-        Set up a new session
-      </button>
+      {needsNewPairing ? (
+        <p className="muted">For a new session, ask the operator for a new pairing link.</p>
+      ) : (
+        <button type="button" className="btn btn-primary" onClick={onRestart}>
+          Set up a new session
+        </button>
+      )}
     </section>
   );
 }

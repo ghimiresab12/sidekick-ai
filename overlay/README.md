@@ -1,158 +1,143 @@
 # Sidekick overlay: companion UI, private voice, session review
 
-> **Status: connected to the real backend code, with synthetic input.** The overlay consumes the shared
-> contracts (`src/contracts/types.ts`) and, by default, runs the **real** session engine,
-> `SidekickCoordinator` and reasoning module inside the page, fed by a two-step synthetic demo feed.
-> Reasoning uses the **deterministic mock provider, not Gemini**. No Chert, FaceTime, microphone, camera or
-> screen share is involved. It is a **companion browser panel**, not a native FaceTime overlay.
+> **Status: a client of the local Sidekick bridge, tested with mocks only.** By default the overlay is served
+> by the Node bridge at `/ui/`, pairs with a one-time code and shows the bridge's live session state. The
+> bridge owns the engine, coordinator and all session state; the overlay keeps none of its own. It has been
+> tested end to end against the real bridge runtime with **mock reasoning, mocked Gemini vision HTTP and
+> synthetic agent input**, not with Chert, the Python agent or live Gemini. It is a **companion browser
+> panel**, not a native FaceTime overlay.
 
-Owner: UI / voice / review workstream (D). Branch: `feature/overlay-backend-integration`.
+Owner: UI / voice / review workstream (D). Contract: `docs/engineering.md` "Integration milestone 4"
+(browser API, pairing, live state stream) and "Overlay adoption status".
 
 ## Run it
 
-Requires Node 24 (root `.nvmrc`). The overlay imports the shared backend modules from `../src`, so both
-package sets must be installed:
+Requires Node 24 (root `.nvmrc`). The overlay imports shared types and modules from `../src`, so both package
+sets must be installed:
 
 ```bash
-npm ci                    # repository root (types for the shared modules)
-cd overlay && npm ci
-npm run dev               # http://localhost:5173
-npm test                  # Vitest, including end-to-end tests through the real coordinator
-npm run typecheck         # fails if src/contracts/types.ts drifts from what the overlay uses
-npm run build             # typecheck + production build into overlay/dist (git-ignored)
+npm ci                                  # repository root
+npm ci --prefix overlay
+npm --prefix overlay test               # Vitest: HTTP adapter, simulation end to end, voice, privacy boundary
+npm --prefix overlay run typecheck      # fails if src/contracts/types.ts drifts from what the overlay uses
+npm --prefix overlay run build          # typecheck + production build into overlay/dist (git-ignored)
 ```
 
-### Demo script (about 2 minutes)
+### With the bridge (default)
 
-1. Tick the consent box, then **Start observing**.
-2. Open **Demo controls** and **Send next synthetic observation**: "Alex is responsible for left defense."
-   Reasoning records the role. No card yet: advice needs screen evidence.
-3. Send the second observation (a structured frame: left zone uncovered). The coordinator runs reasoning,
-   the engine validates the candidate, and **Left defense appears exposed** appears **silently**, with
-   Alex's role and the evidence provenance.
-4. **Explain with voice** speaks a grounded explanation on this device only. Try **Stop voice**.
-5. **Pause**: speech stops, the engine marks the card stale and moves it to History. The main slot says
-   "Paused" instead of showing earlier advice as current. **History → Show** brings it back, labelled earlier.
-6. **Resume**: the card stays earlier until new evidence arrives (engine rule).
-7. **End session**, confirm, **Generate review**. The timeline is the engine's own event log.
-8. **Discard session**, confirm. The engine deletes the session.
+**Local demo, no credentials needed.** `scripts/bridge-demo.mjs` starts the real bridge (root `dist/`) serving
+`overlay/dist`, and plays the operator and the agent with random per-run tokens (never printed). Reasoning is
+the deterministic mock provider; Gemini vision runs with its HTTP mocked; inputs are synthetic.
 
-Tick **Simulate speech synthesis unavailable** to see the text fallback.
+```bash
+npm run build && npm --prefix overlay run build
+node overlay/scripts/bridge-demo.mjs          # prints a one-time pairing URL; type commands below
+```
 
-## What is real, synthetic or missing
+1. Open the printed `http://127.0.0.1:8787/ui/#pair=…` URL within 2 minutes. The code is removed from the
+   address bar; a reload recovers the session from the HttpOnly cookie.
+2. The overlay shows **Waiting for the operator** (no consent button). Add a participant if you like, then
+   **Confirm gaming** (or type `gaming`).
+3. Type `consent` (the operator attests that everyone agreed). The overlay switches to **Observing**.
+4. Type `role`, then `frame`. **Left defense appears exposed** appears silently with Alex's role and evidence.
+5. **Explain with voice** speaks the bridge's explanation on this device only. Try **Stop voice**.
+6. **Pause** in the overlay: speech stops and the card becomes earlier advice. There is no Resume button;
+   type `resume` (operator). Type `frame` again for fresh evidence.
+7. Type `drop` to cut every connection: the overlay shows **Reconnecting**, disables actions, and recovers.
+8. **End session**, **Generate review**, then **Discard session**. Afterwards the overlay asks for a new pairing
+   link.
+
+**With a real bridge:** `npm run bridge` (needs `SIDEKICK_AGENT_TOKEN` and `SIDEKICK_CONTROL_TOKEN`, see
+`.env.example`), then `npm run pair -- --room <room> [--participant <name>]`. Restart the bridge after every
+overlay build (it snapshots `overlay/dist` at startup). For the Vite dev server, start the bridge with
+`SIDEKICK_UI_DEV_ORIGIN=http://localhost:5173`, run `npm --prefix overlay run dev`, and open
+`http://localhost:5173/ui/#pair=<code>`; `/v1` is proxied to the bridge.
+
+### Offline simulation (development only)
+
+```bash
+npm --prefix overlay run dev:simulation       # http://localhost:5173/ui/
+```
+
+Runs the **real** engine, coordinator and reasoning (mock provider) **inside the page**, fed by a two-step
+synthetic feed (Demo controls → **Send next synthetic observation**). It uses the same browser projection
+and explanation text as the bridge. It is selected only by `--mode simulation`; the default build does not
+contain it. Tick **Simulate speech synthesis unavailable** to see the text fallback.
+
+## What is real, mocked or missing
 
 | Capability | Status |
 |---|---|
-| Session lifecycle (start, pause, resume, end, discard) | **Real engine + coordinator** rules; UI disables what the engine would reject |
-| Recommendations, staleness, dedupe, evidence, player context | **Real engine** `OverlayState`, versioned |
-| Reasoning | **Real `reason()`** with the deterministic **mock provider**. Gemini is server-only |
-| Late reasoning after pause/end | **Real coordinator** discards it (tested) |
-| Voice requests (pending, playing, finished, failed, cancelled) | **Real engine** voice lifecycle, by request id |
-| Explanation text | Backend-side template from `ExplanationContext` (`backend/explanationText.ts`), not a model |
+| Session state | **Bridge-owned**, streamed as projected `OverlayState` over same-origin SSE; versions that don't increase are dropped |
+| Pairing and auth | One-time code → HttpOnly cookie for one session; `401` → "ask the operator for a new pairing link". No token in the browser |
+| Consent | **Operator-only** (all participants agreed). The overlay waits and offers no consent button |
+| Lifecycle | Pause, End, Discard from the overlay. **Resume is operator-only** |
+| Participants and activity | Register names (normalized by the bridge), **Confirm gaming** |
+| Recommendations, staleness, evidence, player context | **Real engine** via the bridge; safe role labels only |
+| Explanation text | **Server-side** (`src/explanations/explanation-text.ts`), returned only to the requesting device |
+| Voice requests | Engine lifecycle by request id; owned by this device; refused reports stop speech |
 | Local speech | Browser `speechSynthesis`, on-device voices only |
-| Session review | Rule-based summary of the **real engine timeline**. No backend review service exists yet |
-| Input | **Synthetic**: two scripted observations (`backend/inProcessBackend.ts`) |
-| HTTP/SSE bridge to a separate backend process | **Not on main.** Adapter not written yet (see "Bridge requirements") |
-| Chert / FaceTime input | **Not connected** |
-| Private playback verified isolated from the call | **Not yet tested live** (CH-4) |
+| Session review | Rule-based summary of the **browser timeline** (no goal or decision wording). No backend review service exists |
+| Reconnection | Browser retry, then cookie check and backoff; actions disabled while disconnected |
+| Inputs in testing | **Synthetic** (demo harness). Python agent and Chert **not connected** |
+| Private playback isolated from the call | **Not yet tested live** (CH-4) |
+| Overlay CI job | **Not set up** (needs the CI owner) |
 
 ## Architecture
 
 ```text
-synthetic feed ─▶ SidekickCoordinator ─▶ reason() + mock provider
-                       │  (abort on pause/end, revalidate, select observations)
-                       ▼
-                 SidekickEngine  ── subscribe ─▶ OverlayState (versioned)
-                       ▲                               │
-   inProcessBackend implements SidekickBackend  ◀──────┘   ◀── the ONLY seam the UI uses
-                       │
-   useSidekickSession (reducer: version dedupe, connection, pending)   useVoiceExplanation
-                       └──────────────────────┬──────────────────────────────┘
-                                        App.tsx (voice stop rules, confirmations)
-                                              ▼
-   ConsentScreen · LiveScreen(StatusBar, RecommendationCard[PlayerContext, EvidenceList, VoiceControls], History)
+   Chert / agent (not connected)   operator (control token)        demo harness (scripts/bridge-demo.mjs)
+                 └──────────────────────┬──────────────────────────────────┘
+                                        ▼
+              Node bridge ── SidekickCoordinator ── SidekickEngine ── reason() + provider
+              (owns all session state; browser projection; serves overlay/dist at /ui/)
+                                        │  /v1/ui/pair · /v1/ui/session · SSE stream · JSON routes (cookie)
+                                        ▼
+   httpBackend implements SidekickBackend   ◀── the ONLY seam the UI uses (inProcessBackend in simulation mode)
+                                        │
+   useSidekickSession (reducer: version dedupe, connection, discard)   useVoiceExplanation
+                                        ▼
+                         App.tsx (voice stop rules, confirmations)
+                                        ▼
+   ConsentScreen(SessionSetup) · LiveScreen(StatusBar, RecommendationCard, History)
    EndSessionPanel · SessionReview · StateScreens (connecting, unavailable, reconnecting, discarded)
 ```
 
 ```text
 src/
   contracts/shared.ts      type-only re-export of src/contracts/types.ts (no duplicates)
-  contracts/pending.ts     types with NO shared equivalent yet (GAP 1, GAP 2)
-  backend/                 SidekickBackend port, inProcessBackend, explanationText, browserCrypto shim
+  contracts/pending.ts     SessionReview only (engineering.md §8 proposal; no shared type yet)
+  backend/                 SidekickBackend port, httpBackend (default), inProcessBackend (simulation), browserCrypto
   session/                 lifecycle table, reducer (version dedupe, connection), selectors, hook
   voice/                   speechService (only speechSynthesis user), voiceController (request ids), hook
-  review/buildReview.ts    review from SessionEvent[] + final OverlayState
+  review/buildReview.ts    review from BrowserSessionTimeline + final OverlayState
   components/              presentational components (props in, callbacks out)
+scripts/bridge-demo.mjs    local bridge + operator/agent harness with mocked inputs
 ```
 
-`src/engine.ts` imports `randomUUID` from `node:crypto`; `vite.config.ts` and `tsconfig.json` map that one
-import to `backend/browserCrypto.ts` (Web Crypto). No backend file is modified.
+The simulation bundles `src/engine.ts`, which imports `randomUUID` from `node:crypto`; `vite.config.ts` and
+`tsconfig.json` map that one import to `backend/browserCrypto.ts` (Web Crypto).
 
-## Contract mapping (provisional → shared)
+## Shared contracts used
 
-| Overlay before | Now |
-|---|---|
-| `contracts/sidekick.ts` (copy of old engineering.md §3) | **Deleted.** `contracts/shared.ts` re-exports `src/contracts/types.ts` |
-| `Session` + `RecommendationWithContext[]` + `Observation[]` snapshot | `OverlayState` (`prominent`, `history`, `voiceBusy`, `activeVoiceRequest`, `version`) |
-| UI ranking of cards | Engine's `prominent` (active only) and `history` order. The UI only adds "Show" for open cards |
-| Evidence with observation summary and quality | `RecommendationView.evidence`: source, kind (condition/context), time. No text, by design |
-| `relatedParticipantIds` resolved via `Session.participants` | `RecommendationView.relatedParticipants` (roles at creation) + `contextChangedSinceCreation` |
-| `TimelineEvent` + proposed event types | `SessionEvent` (typed payloads). `voice_finished.outcome` gives finished / stopped / failed |
-| `requestVoiceExplanation(recId)` → text | `requestExplanation` → `ExplanationScript { request: VoiceRequest, text, … }` |
-| `reportVoicePlayback(recId, …)` | `reportVoiceStatus(requestId, …)` and `cancelExplanation(requestId)` |
-| `canExplain` computed in UI | `RecommendationView.canExplain` from the engine |
-| Hand-written mock backend + seed + validator | **Deleted.** Replaced by the real engine + coordinator in-process |
+`OverlayState`, `RecommendationView`, `VoiceRequest`, `ExplanationScript`, `BrowserSessionTimeline` /
+`BrowserSessionEvent`, `StaleReason`, `EngineError`, all from `src/contracts/types.ts`. The overlay never
+receives `ExplanationContext` (it contains transcript text). The only overlay-defined data type left is
+`SessionReview`, because the engineering.md §8 type is still a proposal.
 
-## Contract gaps (need the contracts owner's decision)
+## Privacy boundary
 
-None of these change an existing shared type. Each is additive.
-
-1. **Explanation text.** engineering.md §3.2 says the backend generates text from `ExplanationContext`, but
-   `types.ts` has no type for the result. The overlay uses `ExplanationScript { request: VoiceRequest; text;
-   refersToEarlierObservation }` in `contracts/pending.ts`. Proposal: add it to `types.ts`. The overlay must
-   not receive `ExplanationContext` itself, because it contains raw transcript text.
-2. **Session review.** `SessionReview` exists only as a proposal in engineering.md §8, and no review service
-   exists. The overlay builds it client-side from the engine timeline (`review/buildReview.ts`). Proposal:
-   add the §8 type to `types.ts`, then decide whether a backend `generateReview` replaces the client builder.
-3. **Participants for consent.** `OverlayState` has no participant list, so the consent screen no longer
-   names participants. Not needed for the MVP; noted in case design.md wants names there.
-4. **Activity confirmation.** The overlay has no "confirm activity" control yet. The in-process setup
-   confirms `gaming`, and `OverlayState.suggestedActivity` is shown when present.
-
-## Bridge requirements (for the local HTTP/SSE bridge, not on main)
-
-The overlay needs one more `SidekickBackend` implementation over HTTP. To keep a single contract, the bridge
-should send **shared types unchanged**, not a translated legacy view, and call the coordinator for lifecycle
-and input:
-
-| Port operation | Proposed bridge route | Backend call |
-|---|---|---|
-| `connect` | `GET /api/session/stream` (SSE, `data:` = `OverlayState`) | `engine.subscribe` |
-| `startSession` … `discardSession` | `POST /api/session/{start,pause,resume,end,discard}` | `coordinator.*` |
-| `dismiss` | `POST /api/session/dismiss {recommendationId}` | `engine.dismiss` |
-| `requestExplanation` | `POST /api/session/voice {recommendationId}` → `ExplanationScript` | `engine.requestExplanation` + text |
-| `reportVoiceStatus` | `POST /api/session/voice-status {requestId, status}` | `engine.reportVoiceStatus` |
-| `cancelExplanation` | `POST /api/session/voice-cancel {requestId}` | `engine.cancelExplanation(…, 'user')` |
-| `getTimeline` | `GET /api/session/timeline` → `{ events, truncated }` | `engine.getTimeline` |
-
-Errors as `{ error: EngineError }`. The UI already handles `reconnecting` / `unavailable`, drops snapshots
-whose `version` does not increase, disables actions while disconnected and never shows the last state as live.
-The bridge should require `Content-Type: application/json` and check `Origin`, so other websites cannot
-drive it.
-
-## Privacy boundary for voice
-
-**What the code guarantees** (enforced by `src/privacyBoundary.test.ts`, which now also scans every bundled
-backend module):
+**What the code guarantees** (enforced by `src/privacyBoundary.test.ts`):
 
 - Sound comes only from `window.speechSynthesis` in `voice/speechService.ts`. No media stream is created.
-- No WebRTC, `getUserMedia`/`getDisplayMedia`, `MediaStream`, Web Audio, LiveKit/Chert imports or network
-  calls, in the overlay or in the backend modules it bundles. The Gemini adapter and `process.env` are never
-  imported.
+- No WebRTC, `getUserMedia`/`getDisplayMedia`, `MediaStream`, Web Audio or LiveKit/Chert imports anywhere,
+  including the shared modules the simulation bundles. The Gemini adapter and `process.env` are never imported.
+- Network access only in `backend/httpBackend.ts`: same-origin paths, no absolute URLs, no `Authorization`
+  header. The default build does not contain the in-process engine.
 - Only on-device voices (`localService === true`); otherwise a labelled text fallback.
 - Sound starts only from **Explain with voice**, scoped to one recommendation and one engine voice request.
-- Speech stops on Stop, dismiss of that card, pause, end, discard, connection loss, unmount, tab close, and
-  whenever the engine drops `activeVoiceRequest`.
+- Speech stops on Stop, dismiss of that card, pause, end, discard, connection loss, unmount, tab close,
+  whenever the engine drops or replaces `activeVoiceRequest`, and when the bridge refuses a playback report.
 
 **Must be tested live (CH-4):**
 
@@ -164,6 +149,7 @@ backend module):
 
 ## Open questions
 
-1. Who generates `SessionReview` long term: rules (today), a model, or both?
-2. Should the overlay get a "confirm activity" control, using `OverlayState.suggestedActivity`?
-3. Is consent per participant or per session? (The UI asks the requester to confirm.)
+1. Who generates `SessionReview` long term: rules in the browser (today), a backend service, or a model?
+2. The engine allows one live explanation per session, so one participant's explanation blocks the others
+   (`409 voice_busy`). Intended for multi-device use?
+3. Per-participant consent is out of scope for the MVP (operator attests for the group).

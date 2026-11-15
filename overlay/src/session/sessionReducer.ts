@@ -9,7 +9,8 @@
  * (engineering.md §3). A snapshot whose version is not greater than the one applied
  * is dropped, so a replayed or reordered message can never roll the UI back.
  */
-import type { SessionReview, SessionTimeline } from '../contracts/pending';
+import type { SessionReview } from '../contracts/pending';
+import type { BrowserSessionTimeline as SessionTimeline } from '../contracts/shared';
 import type { OverlayState } from '../contracts/shared';
 import type { ConnectionStatus } from '../backend/SidekickBackend';
 import { allCards } from './selectors';

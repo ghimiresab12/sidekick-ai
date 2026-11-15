@@ -612,6 +612,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 - **Implemented:** the browser API, pairing, live state stream and same-origin UI serving in the Node bridge.
 - **Tested:** end-to-end HTTP tests against the production runtime, with mock reasoning and Gemini vision mocked at the HTTP level. A network guard proves zero external calls.
 - **Not done:** the overlay (`overlay/`) is **not changed** in this milestone; it still defaults to its in-process simulation until Tunji adds the HTTP backend below. **Localhost only:** the bridge binds `127.0.0.1` and is not a deployable public service.
+- **Overlay follow-up (overlay workstream, after this milestone):** the overlay's HTTP backend is implemented and is now the default; see "Overlay adoption status" below. Tested against this bridge with mocks only.
 
 ### Architecture
 
@@ -718,6 +719,21 @@ The engine keeps raw evidence (goal utterances, decision text, role text) intern
 6. **Voice:** report playback by `request.id`. Treat `404 voice_request_not_found` as "this explanation is over": stop speaking, don't retry. Stop speaking when `activeVoiceRequest` disappears or changes, or when a call returns `409`.
 7. **CSP check:** verify the production build works under the CSP above (no inline scripts or styles in markup).
 8. **CI:** add an overlay test job, coordinated with whoever owns CI.
+
+### Overlay adoption status (overlay workstream, 2026-11-15)
+
+No bridge, coordinator or shared-contract code was changed for this. Status of the eight items above:
+
+1. **Shared types: done.** `ExplanationScript` and `BrowserSessionTimeline` come from `src/contracts/types.ts`; the overlay's copies are deleted. `overlay/src/contracts/pending.ts` keeps only `SessionReview` (§8 proposal; no review service exists).
+2. **Explanation text: done.** The in-process simulation imports `src/explanations/explanation-text.ts`; `overlay/src/backend/explanationText.ts` is deleted. The simulation also applies `src/privacy/browser-projection.ts`, so both modes return the same browser shapes.
+3. **HTTP backend: done.** `overlay/src/backend/httpBackend.ts` implements `SidekickBackend` (pairing bootstrap, `GET /v1/ui/session` recovery, `EventSource`, the routes above). It is the default. The simulation is selected only by `vite --mode simulation`; the flag is a build-time constant, so the default build contains no engine, coordinator or reasoning code.
+4. **Build: done.** Vite `base` is `/ui/`, production source maps are off, and the dev server proxies `/v1` to the bridge (needs `SIDEKICK_UI_DEV_ORIGIN=http://localhost:5173`).
+5. **UI controls: done.** Participant registration (shows the returned normalized name and the 400/409 errors), "Confirm gaming", "Waiting for the operator" while `starting` with no consent button, Pause/End but no Resume button ("Paused — the operator resumes").
+6. **Voice: done.** Playback is reported by `request.id`. A refused `playing_locally` report (e.g. `404 voice_request_not_found` or a 409) stops speech locally with no retry; speech also stops when `activeVoiceRequest` disappears or changes.
+7. **CSP: verified** with the production build served by the bridge in headless Chrome: no CSP violations.
+8. **CI: not done.** Still needs whoever owns CI.
+
+**Verification:** overlay unit tests (fake fetch and `EventSource`) plus a headless-Chrome run against the production bridge runtime with mock reasoning, mocked Gemini vision HTTP and synthetic agent input (`overlay/scripts/bridge-demo.mjs`). Not tested with Chert, the Python agent or live Gemini. The session review is still built in the browser from `BrowserSessionTimeline` (rule-based; no backend review service).
 
 ### Environment
 

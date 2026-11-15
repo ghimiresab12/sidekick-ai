@@ -14,6 +14,8 @@ interface Props {
   selectedId: string | null;
   pending: PendingAction | null;
   allowed: (cmd: SessionCommand) => boolean;
+  /** Bridge mode: resume is operator-only, so no Resume button is offered. */
+  operatorResumes: boolean;
   voice: VoiceApi;
   onPause: () => void;
   onResume: () => void;
@@ -40,6 +42,7 @@ export function LiveScreen(props: Props) {
         syntheticInput={props.syntheticInput}
         pending={pending}
         allowed={props.allowed}
+        operatorResumes={props.operatorResumes}
         onPause={props.onPause}
         onResume={props.onResume}
         onRequestEnd={props.onRequestEnd}
@@ -71,7 +74,11 @@ export function LiveScreen(props: Props) {
           {overlay.status === 'paused' ? (
             <>
               <h2>Paused</h2>
-              <p>No new recommendations while paused. Resume to continue observing.</p>
+              <p>
+                {props.operatorResumes
+                  ? 'No new recommendations while paused. The operator resumes observation.'
+                  : 'No new recommendations while paused. Resume to continue observing.'}
+              </p>
             </>
           ) : (
             <>

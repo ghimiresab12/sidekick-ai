@@ -15,9 +15,10 @@
  * without reporting anything back.
  *
  * Rules: one explanation at a time across ALL cards; explain() is ignored while
- * busy; a token invalidates late async results after stop/reset.
+ * busy; a token invalidates late async results after stop/reset; if the backend refuses
+ * the `playing_locally` report (request already over, or a 409), playback stops.
  */
-import type { ExplanationScript } from '../contracts/pending';
+import type { ExplanationScript } from '../contracts/shared';
 import type { VoiceRequestStatus } from '../contracts/shared';
 import type { LocalVoiceStatus } from '../backend/SidekickBackend';
 import { splitIntoChunks, type SpeechPlayer, type VoiceLike } from './speechService';
@@ -58,6 +59,14 @@ export const isVoiceBusy = (s: VoiceState) => s.status === 'preparing' || s.stat
 
 /** Fire-and-forget backend report: a failed report must never break local playback. */
 const quietly = (p: Promise<void>) => void p.catch(() => {});
+
+/**
+ * True when the backend REFUSED a report (as opposed to being unreachable): e.g.
+ * `voice_request_not_found` (the explanation is already over) or a 409. The explanation
+ * must then stop locally and is never retried (engineering.md milestone 4, "Voice").
+ */
+const isRefusal = (e: unknown) =>
+  typeof e === 'object' && e !== null && 'code' in e && (e as { code: unknown }).code !== 'unavailable';
 
 export function createVoiceController(deps: VoiceControllerDeps) {
   let state: VoiceState = IDLE_VOICE_STATE;
@@ -130,7 +139,9 @@ export function createVoiceController(deps: VoiceControllerDeps) {
       onStart: () => {
         if (mine !== token) return;
         set({ status: 'speaking', recommendationId, requestId, script, fallback: null });
-        quietly(deps.reportStatus(requestId, 'playing_locally'));
+        void deps.reportStatus(requestId, 'playing_locally').catch((e: unknown) => {
+          if (mine === token && isRefusal(e)) silenceLocally(); // the backend already ended it
+        });
       },
       onEnd: () => {
         if (mine !== token) return;

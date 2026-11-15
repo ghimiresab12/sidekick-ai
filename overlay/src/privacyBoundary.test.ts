@@ -4,6 +4,9 @@
  * synthesis. This scans every non-test source file for media-capture,
  * peer-connection and call-SDK usage.
  *
+ * Network access is allowed in exactly one file, `backend/httpBackend.ts` (the client of
+ * the local bridge's browser API). Everything else stays network-free.
+ *
  * This proves what the CODE does. It cannot prove acoustic isolation or OS
  * screen-share audio behaviour — those need the live CH-4 test.
  */
@@ -23,8 +26,11 @@ const FORBIDDEN: Array<[string, RegExp]> = [
   ['audio routed to a stream', /createMediaStreamDestination|captureStream\s*\(/],
   ['Web Audio graph', /\bnew\s+(AudioContext|webkitAudioContext)\b/],
   ['call SDK import', /from\s+['"][^'"]*(livekit|chert)[^'"]*['"]/i],
-  ['network calls from the overlay', /\bfetch\s*\(|\bXMLHttpRequest\b|\bnew\s+WebSocket\b/],
+  ['network calls', /\bfetch\s*\(|\bXMLHttpRequest\b|\bnew\s+WebSocket\b|\bEventSource\b|\bsendBeacon\b/],
 ];
+
+/** The only overlay file allowed to talk to the network (the local bridge, same origin). */
+const NETWORK_CLIENT = './backend/httpBackend.ts';
 
 describe('privacy boundary (static)', () => {
   it('found the source files', () => {
@@ -34,11 +40,29 @@ describe('privacy boundary (static)', () => {
   for (const [label, pattern] of FORBIDDEN) {
     it(`no ${label}`, () => {
       const offenders = Object.entries(sources)
+        .filter(([file]) => !(label === 'network calls' && file === NETWORK_CLIENT))
         .filter(([, code]) => pattern.test(code))
         .map(([file]) => file);
       expect(offenders).toEqual([]);
     });
   }
+
+  it('the network client exists and only uses same-origin bridge paths', () => {
+    const code = sources[NETWORK_CLIENT];
+    expect(code).toBeDefined();
+    // No absolute URLs: requests go to the bridge that served the page (base '' by default).
+    expect(code).not.toMatch(/['"`]https?:\/\//);
+    expect(code).not.toMatch(/['"]?authorization['"]?\s*:/i); // never sends an Authorization header
+    expect(code).not.toMatch(/['"`]Bearer\s/); // never builds a bearer credential
+  });
+
+  it('the in-process simulation is never imported statically by the app (live bundle has no engine)', () => {
+    const offenders = Object.entries(sources)
+      .filter(([file]) => !file.startsWith('./backend/inProcessBackend'))
+      .filter(([, code]) => /^import[^;]*from\s+['"][^'"]*inProcessBackend['"]/m.test(code))
+      .map(([file]) => file);
+    expect(offenders).toEqual([]);
+  });
 
   it('speechSynthesis is used only in voice/speechService.ts', () => {
     const users = Object.entries(sources)
@@ -60,6 +84,8 @@ const backendSources = import.meta.glob(
     '../../src/sessions/*.ts',
     '../../src/recommendations/*.ts',
     '../../src/coordinator/*.ts',
+    '../../src/privacy/*.ts',
+    '../../src/explanations/*.ts',
     '../../src/reasoning/*.mts',
     '../../src/adapters/model/mock.mts',
   ],

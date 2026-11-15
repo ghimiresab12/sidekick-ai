@@ -1,17 +1,26 @@
 import { useId, useState } from 'react';
+import type { SetupControls } from '../backend/SidekickBackend';
 import type { OverlayState } from '../contracts/shared';
 import { capitalize } from '../ui/format';
+import { SessionSetup } from './SessionSetup';
 
 interface Props {
   overlay: OverlayState;
   syntheticInput: boolean;
+  /** `operator`: consent is given by the operator for the whole group; no consent button here. */
+  consent: 'local' | 'operator';
+  setup: SetupControls | undefined;
   starting: boolean;
   disabled: boolean;
   onStart: () => void;
 }
 
-/** Session setup/consent (design.md §2.1, §7): explicit opt-in before anything is processed. */
-export function ConsentScreen({ overlay, syntheticInput, starting, disabled, onStart }: Props) {
+/**
+ * Session setup/consent (design.md §2.1, §7): explicit opt-in before anything is processed.
+ * With the bridge, consent is operator-only (engineering.md milestone 4): the operator
+ * attests that every participant agreed, so this page only waits and never offers a button.
+ */
+export function ConsentScreen({ overlay, syntheticInput, consent, setup, starting, disabled, onStart }: Props) {
   const [agreed, setAgreed] = useState(false);
   const checkId = useId();
 
@@ -58,10 +67,19 @@ export function ConsentScreen({ overlay, syntheticInput, starting, disabled, onS
         </div>
         <div>
           <dt>Input</dt>
-          <dd>{syntheticInput ? 'Synthetic demo feed, no live Chert connection' : 'Live session input'}</dd>
+          <dd>{syntheticInput ? 'Synthetic demo feed, no live Chert connection' : 'From the call agent via the local bridge (live Chert capture not yet verified)'}</dd>
         </div>
       </dl>
 
+      {setup && <SessionSetup setup={setup} overlay={overlay} disabled={disabled} />}
+
+      {consent === 'operator' ? (
+        <div className="waiting" role="status" aria-live="polite">
+          <strong>Waiting for the operator.</strong> Observation starts only after the operator confirms that everyone
+          on the call agreed. Nothing is processed until then.
+        </div>
+      ) : (
+        <>
       <label className="checkbox" htmlFor={checkId}>
         <input id={checkId} type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
         <span>
@@ -74,6 +92,8 @@ export function ConsentScreen({ overlay, syntheticInput, starting, disabled, onS
       <button type="button" className="btn btn-primary btn-large" disabled={!agreed || starting || disabled} onClick={onStart}>
         {starting ? 'Starting…' : 'Start observing'}
       </button>
+        </>
+      )}
     </section>
   );
 }
