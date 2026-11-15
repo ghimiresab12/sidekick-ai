@@ -666,6 +666,15 @@ export class SidekickEngine {
       if (isConditionStale(newestAt, nowMs, this.config.staleAfterMs)) {
         return err('stale_evidence', 'newest condition evidence is older than the stale window');
       }
+      // A resolved issue may recur, but never from evidence at/before its resolution.
+      // Generation scopes this watermark so producer clock skew across resume is safe.
+      for (const rec of s.recommendations.values()) {
+        if (rec.fingerprint !== candidate.fingerprint || rec.status !== 'resolved' || !rec.resolvedByObservationId) continue;
+        const resolution = s.observations.get(rec.resolvedByObservationId);
+        if (resolution?.observation.captureGeneration === s.captureGeneration && newestCondition.observedAtMs <= resolution.observedAtMs) {
+          return err('stale_evidence', 'condition evidence predates an observed resolution');
+        }
+      }
 
       const changed = this.#sweep(s, nowMs);
       const decision = decideProposal(s.recommendations.values(), candidate.fingerprint, nowMs, this.config.cooldownMs);
@@ -744,21 +753,31 @@ export class SidekickEngine {
 
   /**
    * Marks the issue resolved. Requires an observation from this session whose source
-   * time is strictly newer than the card's newest condition evidence (FR-13). Whether
+   * time is strictly newer than the card's newest condition evidence (FR-13), with
+   * fresh, eligible, clear screen evidence from the current generation. Whether
    * that observation actually shows a resolution is the reasoning layer's call.
    */
   resolve(sessionId: string, recommendationId: string, observationId: string): Result<Recommendation> {
     return this.#withSession(sessionId, (s) => {
+      if (s.status !== 'active') return err('session_not_active');
       const rec = s.recommendations.get(recommendationId);
       if (!rec) return err('recommendation_not_found');
       if (!isOpenCard(rec)) return err('invalid_transition', `cannot resolve a ${rec.status} recommendation`);
       const stored = s.observations.get(observationId);
       if (!stored) return err('evidence_not_found');
+      if (stored.observation.captureGeneration !== s.captureGeneration) return err('stale_evidence', 'resolution evidence is from an earlier capture generation');
+      if (stored.observation.source !== 'screen' || stored.observation.evidenceQuality !== 'clear') return err('insufficient_evidence', 'resolution requires clear screen evidence');
+      const nowMs = this.#nowMs();
+      if (stored.observedAtMs > nowMs || isConditionStale(stored.observation.observedAt, nowMs, this.config.staleAfterMs)) {
+        return err('stale_evidence', 'resolution evidence is future-stamped or stale');
+      }
       if (stored.observedAtMs <= Date.parse(rec.lastConditionAt)) {
         return err('resolution_needs_newer_evidence');
       }
       this.#setStatus(rec, 'resolved');
       rec.resolvedByObservationId = observationId;
+      const voice = s.activeVoiceRequestId === undefined ? undefined : s.voiceRequests.get(s.activeVoiceRequestId);
+      if (voice?.recommendationId === rec.id) this.#cancelActiveVoice(s, 'recommendation_resolved');
       this.#record(
         s,
         { type: 'recommendation_resolved', recommendationId: rec.id, observationId },
