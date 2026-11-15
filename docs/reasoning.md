@@ -127,3 +127,17 @@ Mock regex extraction is deliberately limited and is never used as an undisclose
 No persistent storage, session mutation, UI, voice delivery, Chert SDK calls, or raw media retention
 is added. Input/output sizes and timeouts are bounded. Cancellation is propagated and late results
 must still pass the engine's current-state checks. No commits or pushes are performed by these tools.
+
+## Live Gemini schema compatibility verification
+
+A synthetic live smoke test with gemini-3.5-flash-lite returned HTTP 400 with the original constrained
+response schema. Minimal generation and a simple JSON schema succeeded. Removing maxItems and
+additionalProperties from the provider schema made the full request succeed. This identifies a
+compatibility problem in this request, not a claim that these keywords are universally unsupported.
+The local validator still enforces array limits, allowed fields, evidence scope and freshness.
+The prompt now explicitly requires exact quotes for every cited context AND condition observation.
+
+The final end-to-end live smoke test returned ok=true and one validated left-defense candidate citing
+screen-1 and conversation-1, with no withheld candidates. The input was synthetic; no private call
+content was sent. This verifies this model/request combination once, not general model accuracy,
+latency guarantees or Chert integration. New checks pass: 82 offline tests and strict TypeScript.

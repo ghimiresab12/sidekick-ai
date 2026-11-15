@@ -333,6 +333,15 @@ The shared runtime is pinned to Python 3.13 in `agent/.python-version`, `pyproje
 
 **Integration status:** these findings are from the exported source and docs only. No real LiveKit or Chert session was run. The source does not contain a Chert adapter or Sidekick recommendation/overlay/review path. Chert screen-share frame shapes, transcript events, consent/lifecycle behavior, overlay delivery, and the product's selected voice action remain unverified. Do not present the exported LiveKit starter as a tested Chert integration.
 
+### Gemini live smoke follow-up
+
+The normalized synthetic reasoning path was exercised against gemini-3.5-flash-lite. A provider-schema
+compatibility fix omits maxItems/additionalProperties from the API schema; strict local output validation
+still enforces both. A full live request returned one evidence-linked candidate successfully. Exact
+quote coverage for condition and context evidence is explicitly prompted and locally verified. This
+is a one-fixture Gemini transport/validation proof only; Chert, raw vision and overall accuracy remain
+unverified. See docs/reasoning-verification.md for the distinction from earlier mock-only results.
+
 ## Integration milestone 1 — coordinator (implemented 2026-11-14, mock-only)
 
 **Status:** implemented and tested **in-process with mocks only**:

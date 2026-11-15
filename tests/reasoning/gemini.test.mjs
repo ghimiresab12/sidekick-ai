@@ -63,3 +63,20 @@ test('network failures are sanitized', async () => {
   const p = createGeminiProvider(options(async () => { throw Error('secret token'); }));
   await assert.rejects(p.generate(input), /Gemini request failed or was cancelled/);
 });
+
+test('provider schema avoids constraints rejected in the live smoke test', async () => {
+  const p = createGeminiProvider(options(async (url, init) => {
+    const schema = JSON.parse(init.body).generationConfig.responseJsonSchema;
+    function inspect(value) {
+      if (!value || typeof value !== 'object') return;
+      assert.equal(Object.hasOwn(value, 'maxItems'), false);
+      assert.equal(Object.hasOwn(value, 'additionalProperties'), false);
+      for (const child of Object.values(value)) inspect(child);
+    }
+    inspect(schema);
+    assert.ok(schema.properties.contextUpdates.items.anyOf);
+    assert.ok(schema.required.includes('recommendationCandidates'));
+    return Response.json(response());
+  }));
+  assert.equal((await reason(input, p)).ok, true);
+});

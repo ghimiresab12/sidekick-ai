@@ -97,10 +97,10 @@ Two Gemini pieces are easy to confuse:
 
 | Piece | Status | What it does |
 |---|---|---|
-| **Gemini reasoning adapter** (`src/adapters/model/gemini.mts`, Prabin) | **Implemented.** Tested against simulated HTTP responses only; no live call yet. | Sends *text* to Gemini (screen summaries, structured facts, transcripts) and returns proposed context updates and recommendation candidates. It never receives images. |
+| **Gemini reasoning adapter** (`src/adapters/model/gemini.mts`, Prabin) | **Implemented and live smoke-tested.** One synthetic normalized request to `gemini-3.5-flash-lite` succeeded (see `docs/reasoning-verification.md`). That proves transport and output validation on one fixture only. It does not verify production accuracy, latency or quotas. | Sends *text* to Gemini (screen summaries, structured facts, transcripts) and returns proposed context updates and recommendation candidates. It never receives images. |
 | **Gemini raw-frame vision adapter** | **Missing.** Not implemented by anyone yet. | Would turn a shared-screen **image** into a screen summary plus structured facts. The coordinator only defines the proposed `VisionPort` interface; tests use a mock that decodes a JSON "image".
 
-No HTTP bridge, Python agent integration, live Gemini call or UI exists yet. See `docs/engineering.md` "Integration milestone 1".
+**Still unverified live:** raw-frame Gemini vision (not built) and the full Sidekick pipeline (Chert → agent → coordinator → Gemini → overlay). The coordinator's own tests use only mocks. No HTTP bridge or Python agent integration exists yet, and the companion UI (`overlay/`) runs on mock data and is not yet connected to the engine. See `docs/engineering.md` "Integration milestone 1".
 
 ## Start here (team and coding assistants)
 
