@@ -1,0 +1,65 @@
+/**
+ * React wrapper around the voice controller.
+ *
+ * `useSyncExternalStore` lets React read state that lives outside React (the
+ * controller) and re-render whenever it changes — no duplicated useState.
+ */
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { SidekickDataSource } from '../data/SidekickDataSource';
+import { createSpeechPlayer, getBrowserSpeech, loadVoices, pickLocalVoice, type SpeechPlayer } from './speechService';
+import { createVoiceController, isVoiceBusy } from './voiceController';
+
+export interface VoiceOptions {
+  /** Mock/demo toggle to exercise the text fallback path. */
+  simulateUnavailable?: boolean;
+}
+
+export function useVoiceExplanation(dataSource: SidekickDataSource, options: VoiceOptions = {}) {
+  const simulateRef = useRef(!!options.simulateUnavailable);
+  simulateRef.current = !!options.simulateUnavailable;
+
+  const [controller] = useState(() => {
+    let player: SpeechPlayer | null = null;
+    return createVoiceController({
+      requestExplanation: (id) => dataSource.requestVoiceExplanation(id),
+      reportPlayback: (id, report) => dataSource.reportVoicePlayback(id, report),
+      isSpeechAvailable: () => !simulateRef.current && getBrowserSpeech() !== null,
+      findLocalVoice: async () => {
+        const speech = getBrowserSpeech();
+        if (!speech) return null;
+        const lang = typeof navigator !== 'undefined' ? navigator.language : 'en';
+        return pickLocalVoice(await loadVoices(speech.synth), lang);
+      },
+      getPlayer: () => {
+        if (player) return player;
+        const speech = getBrowserSpeech();
+        if (!speech) return null;
+        player = createSpeechPlayer(speech.synth, speech.makeUtterance);
+        return player;
+      },
+    });
+  });
+
+  const state = useSyncExternalStore(controller.subscribe, controller.getState);
+
+  // Never leave speech playing when the UI goes away (unmount, tab close).
+  useEffect(() => {
+    const onPageHide = () => controller.reset();
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      controller.reset();
+    };
+  }, [controller]);
+
+  return {
+    state,
+    busy: isVoiceBusy(state),
+    explain: controller.explain,
+    stop: controller.stop,
+    stopIfFor: controller.stopIfFor,
+    reset: controller.reset,
+  };
+}
+
+export type VoiceApi = ReturnType<typeof useVoiceExplanation>;

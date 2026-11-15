@@ -98,6 +98,24 @@ A permissioned Chrome extension remains **a contingency only** if the verified C
 - Starter instructions: <https://app.trychert.com/skills.md>
 - Dami's *PITWALL AI — Technical Architecture & Hackathon Execution Plan*: useful session coordinator, modular ownership and go/no-go testing; **its extension, iMessage, Next.js dashboard, persistence and DevOps layers are not Sidekick MVP commitments.**
 
+## 8. Provisional overlay companion UI (`overlay/`, branch `feature/overlay-ui`)
+
+**Status:** Implemented against **mock data only**. Not connected to Chert, the session engine or a model. **Provisional:** built before any starter was in the repo. The imported LiveKit export in `agent/` is a Python agent with no web UI, so the overlay stays an isolated, standalone app with its own `package.json`. The root `tsconfig.json`, `npm test` and CI do not include `overlay/`.
+
+**Contract alignment (pending):** the overlay was built on the *pre-revision* `engineering.md` §3 types. The approved contracts now live in `src/contracts/types.ts`. Migration target: consume `OverlayState` / `RecommendationView` through `subscribe`, voice through `requestExplanation` / `reportVoiceStatus` / `cancelExplanation` (request IDs), and review from `getTimeline`. Until then, the overlay's copy in `overlay/src/contracts/sidekick.ts` is labeled as superseded. The overlay pins TypeScript 5.9.3, while the root engine uses 7.0.2; align them when integrating.
+
+| Package (exact pin) | Scope | Why |
+|---|---|---|
+| `react`, `react-dom` 18.3.1 | runtime | Component UI; "simple HTML/React as needed" (§2) |
+| `vite` 6.4.5, `@vitejs/plugin-react` 5.2.0 | dev | Dev server and static build. Patched 6.4 line chosen; `npm audit` reports 0 vulnerabilities |
+| `typescript` 5.9.3, `@types/react` 18.3.31, `@types/react-dom` 18.3.7 | dev | Type-checking for the overlay and its contract copy |
+| `vitest` 4.1.12 | dev | Unit tests for lifecycle, reducer, mock backend, review, voice logic and the privacy boundary |
+
+- **No other runtime dependencies.** No UI kit, state library, Zod (hand-written validator instead), router or network client.
+- **Private voice:** browser `speechSynthesis`, **on-device voices only** (`localService === true`); otherwise a labeled text fallback. The overlay imports no WebRTC, media-capture, LiveKit or Chert code (enforced by `overlay/src/privacyBoundary.test.ts`).
+- **Still requires live testing (CH-4):** acoustic pickup through speakers, OS-level screen-share audio capture, and user-gesture rules on the target device.
+- **Integration seam:** `overlay/src/data/SidekickDataSource.ts`. The overlay's interim additions in `overlay/src/contracts/proposed.ts` are largely covered by the approved engine contracts and will be dropped during migration. The overlay does not modify `engineering.md` or `src/contracts/`.
+
 ## Decision update — private explanation (confirmed 2026-11-14)
 
 - **Who hears it:** Only the participant who clicked **Explain with voice** on a selected recommendation.
