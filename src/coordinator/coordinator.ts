@@ -32,7 +32,8 @@ import type {
   SessionSnapshot,
 } from '../contracts/types.js';
 import { SidekickEngine, type EngineOptions } from '../engine.js';
-import { parseIsoTime } from '../contracts/validate.js';
+import { LIMITS, parseIsoTime } from '../contracts/validate.js';
+import type { ResolutionRule } from '../recommendations/recommendation-rules.js';
 import {
   MAX_PARTICIPANTS,
   type CoordinatorDiagnostic,
@@ -72,6 +73,8 @@ export interface CoordinatorOptions {
    * summaries are worded differently. Default `[]`: only identical summaries + facts agree.
    */
   conditionFactKeys?: readonly string[];
+  /** Explicit domain rule; no automatic resolution unless configured by the runtime. */
+  resolutionRule?: ResolutionRule;
   onDiagnostic?: (diagnostic: CoordinatorDiagnostic) => void;
 }
 
@@ -171,6 +174,7 @@ export class SidekickCoordinator {
   readonly #maxReruns: number;
   readonly #maxFrameBytes: number;
   readonly #conditionFactKeys: readonly string[];
+  readonly #resolutionRule: ResolutionRule | undefined;
   readonly #diagnostic: (d: CoordinatorDiagnostic) => void;
   readonly #tasks = new Map<string, SessionTasks>();
 
@@ -193,6 +197,10 @@ export class SidekickCoordinator {
       throw new TypeError('conditionFactKeys must be an array of fact names');
     }
     this.#conditionFactKeys = Object.freeze([...keys]);
+    if (options.resolutionRule !== undefined && typeof options.resolutionRule !== 'function') {
+      throw new TypeError('resolutionRule must be a function');
+    }
+    this.#resolutionRule = options.resolutionRule;
     this.#diagnostic = options.onDiagnostic ?? (() => {});
     this.engine = new SidekickEngine({ ...options.engine, now: this.#now });
   }
@@ -309,8 +317,37 @@ export class SidekickCoordinator {
   /** Already-described screen input (e.g. a simulator). Triggers reasoning when accepted. */
   ingestScreen(sessionId: string, input: ScreenInput): Result<ScreenObservation> {
     const r = this.engine.ingestScreen(sessionId, input);
-    if (r.ok) this.#trigger(sessionId);
+    if (r.ok) {
+      this.#resolveActive(sessionId);
+      this.#trigger(sessionId);
+    }
     return r;
+  }
+
+  /** Resolve before provider work; all newest timestamp ties must positively agree. */
+  #resolveActive(sessionId: string): void {
+    const rule = this.#resolutionRule;
+    if (!rule) return;
+    const snap = this.engine.getSession(sessionId);
+    if (!snap.ok || snap.value.status !== 'active') return;
+    const nowMs = this.#now().getTime();
+    const screens = this.engine.listObservations(sessionId, {
+      source: 'screen', captureGeneration: snap.value.captureGeneration,
+      observedUntil: iso(nowMs), limit: LIMITS.listObservationsMax,
+    });
+    if (!screens.ok || screens.value.length === 0) return;
+    const newest = screens.value.at(-1)! as ScreenObservation;
+    if (nowMs - Date.parse(newest.observedAt) > this.engine.config.staleAfterMs) return;
+    const ties = screens.value.filter((o) => o.observedAt === newest.observedAt) as ScreenObservation[];
+    // A full page consisting entirely of ties may omit a conflicting frame. Fail closed.
+    if (ties.length === LIMITS.listObservationsMax) return;
+    for (const rec of snap.value.recommendations) {
+      // resolve() rechecks lifecycle and evidence if a notification reenters the coordinator.
+      const current = this.engine.getSession(sessionId);
+      if (!current.ok || current.value.status !== 'active' || current.value.captureGeneration !== snap.value.captureGeneration) return;
+      if (rec.status !== 'active' || !ties.every((o) => rule(rec, o))) continue;
+      this.engine.resolve(sessionId, rec.id, newest.id);
+    }
   }
 
   /**
@@ -535,6 +572,8 @@ export class SidekickCoordinator {
   }
 
   async #runOnce(sessionId: string, t: SessionTasks): Promise<void> {
+    // Also covers future-stamped screens when the existing eligibility timer wakes up.
+    this.#resolveActive(sessionId);
     const before = this.engine.getSession(sessionId);
     if (!before.ok) return;
     const snap = before.value;

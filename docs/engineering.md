@@ -143,11 +143,12 @@ Restating the current role refreshes the ordering without creating an event. Ign
    - `now − lastConditionAt > staleAfterMs` (checked on every ingest, propose, `sweepStale` and `sweepAll`);
    - the session pauses or ends;
    - a related participant's role changes (`role_changed`) or the related goal is retired (`goal_changed`).
-7. `resolve` requires an observation whose source time is strictly newer than `lastConditionAt`.
+7. `resolve` requires fresh, already-eligible, clear screen evidence from the current capture generation, strictly newer than `lastConditionAt`. The production coordinator enables the controlled-soccer rule for `left_defense_uncovered`: only active cards resolve, and only when the newest eligible screen shows `leftZoneVisible === true` and `leftZoneUncovered === false`. Every screen tied at that newest timestamp must agree; missing facts or uncertain quality prevent resolution. Stale cards are left unchanged. This runs before asynchronous reasoning, including when future-stamped observations become eligible. The engine records the resolving observation ID and rejects subsequent same-fingerprint proposals whose newest condition evidence is at or before a resolution in the current generation, even after cooldown expires.
 
 **Voice requests.** `requestExplanation` creates a request with a unique ID; only one request per session can be live at a time (`voice_busy`). `reportVoiceStatus` accepts `playing_locally`, then `finished` or `failed`, and only for the current live request. Unknown IDs return `voice_request_not_found`; superseded or terminal IDs return `invalid_transition`. Playback can't start unless the session is active. Cancellation rules:
 - **Pause:** `cancelled` with reason `session_paused`.
 - **End:** `cancelled` with reason `session_ended`.
+- **Recommendation resolved:** a live explanation of that card is `cancelled` with reason `recommendation_resolved`, in the same engine operation as resolution; the overlay stops its local speech when the active request disappears.
 - **Stop button or disconnected client:** `cancelExplanation` with reason `user` or `client_disconnected`.
 - **No callback within `voiceRequestTimeoutMs`:** `cancelled` with reason `timeout`.
 - **Discard:** the request is abandoned with the session; later callbacks return `session_not_found`, and the discarding UI must stop its own playback.
