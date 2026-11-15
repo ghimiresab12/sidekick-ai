@@ -200,3 +200,10 @@ test('engine owns repeated recommendation lifecycle, not the reasoning module', 
   const a = await reason(fixture(), mock); const b = await reason(fixture(), mock);
   assert.deepEqual(a.value.recommendationCandidates, b.value.recommendationCandidates);
 });
+
+test('local bounds and strict fields remain enforced with a lightweight provider schema', async () => {
+  const oversized = output(); oversized.uncertainties = Array(11).fill('Unknown');
+  assert.equal((await reason(fixture(), provider(oversized))).error, 'invalid_output');
+  const extra = output(); extra.recommendationCandidates[0].unapproved = true;
+  assert.equal((await reason(fixture(), provider(extra))).error, 'invalid_output');
+});

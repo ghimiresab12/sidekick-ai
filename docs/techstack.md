@@ -118,3 +118,9 @@ and are isolated in tools/reasoning. These choices apply to this component, not 
 ### Imported LiveKit Agent Builder export
 
 The repository contains the exported Python LiveKit agent in `agent/`. Its declared shared runtime is Python 3.13 with `uv`; the existing LiveKit dependencies and source entrypoint are preserved. This is an imported starter, **not evidence that Chert FaceTime, screen-share, transcript, overlay, recommendation, private voice, or review integration works**. Keep the current Chert verification gates unchanged. The export did not include `uv.lock`, so package ranges are not yet pinned to exact versions; generate and commit the lockfile after resolving dependencies in an environment with package-index access.
+
+### Verified Gemini smoke model
+
+The configured gemini-3.5-flash-lite model successfully handled one synthetic normalized-observation
+reasoning request using generateContent structured JSON. Model selection remains an explicit server
+environment setting, not a hardcoded default. This test does not establish production quality or quotas.
