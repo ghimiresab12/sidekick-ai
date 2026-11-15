@@ -6,10 +6,12 @@
  */
 export const DEFAULT_BRIDGE_PORT = 8787;
 export type ReasoningMode = 'mock' | 'gemini';
+export type VisionMode = 'none' | 'gemini';
 
 export interface BridgeConfig {
   port: number;
   reasoning: ReasoningMode;
+  vision: VisionMode;
   agentToken: string;
   controlToken: string;
 }
@@ -32,6 +34,13 @@ export function loadBridgeConfig(env: Record<string, string | undefined>): Confi
   if (mode !== 'mock' && mode !== 'gemini') {
     return { ok: false, error: 'SIDEKICK_REASONING must be mock or gemini (leave empty for mock)' };
   }
+  const vision = optional(env.SIDEKICK_VISION) ?? 'none';
+  if (vision !== 'none' && vision !== 'gemini') {
+    return { ok: false, error: 'SIDEKICK_VISION must be none or gemini (leave empty for none)' };
+  }
   // Tokens are required: an empty value is passed through and rejected by createBridge.
-  return { ok: true, value: { port, reasoning: mode, agentToken: env.SIDEKICK_AGENT_TOKEN ?? '', controlToken: env.SIDEKICK_CONTROL_TOKEN ?? '' } };
+  return {
+    ok: true,
+    value: { port, reasoning: mode, vision, agentToken: env.SIDEKICK_AGENT_TOKEN ?? '', controlToken: env.SIDEKICK_CONTROL_TOKEN ?? '' },
+  };
 }

@@ -71,13 +71,28 @@ export interface ScreenDescription {
   facts?: ScreenFacts;
 }
 
+/**
+ * Vision adapter. Errors MAY carry a string `code` property; the coordinator maps:
+ *   `invalid_frame` → `invalid_input` (the image itself was rejected),
+ *   `busy`          → `vision_busy`   (adapter-local concurrency limit, not provider rate limiting),
+ *   `timeout`       → `vision_timeout` (the adapter's own deadline),
+ *   anything else   → `vision_failed` (e.g. provider HTTP errors, including provider 429, or invalid output).
+ * Cancellation always wins: if the caller/lifecycle signal aborted, the result is `aborted`
+ * regardless of what the adapter threw.
+ */
 export interface VisionPort {
   describe(frame: FrameInput, signal: AbortSignal): Promise<ScreenDescription>;
 }
 
 // ── Coordinator results and diagnostics ─────────────────────────────────────
 
-export type CoordinatorError = EngineError | 'vision_unavailable' | 'vision_failed' | 'aborted';
+export type CoordinatorError =
+  | EngineError
+  | 'vision_unavailable'
+  | 'vision_failed'
+  | 'vision_busy'
+  | 'vision_timeout'
+  | 'aborted';
 
 export type CoordinatorResult<T> =
   | { ok: true; value: T }
@@ -107,4 +122,5 @@ export type CoordinatorDiagnostic =
   | { type: 'candidate_result'; sessionId: string; outcome: string; recommendationId?: string }
   | { type: 'candidates_withheld'; sessionId: string; reasons: string[] }
   | { type: 'rerun_budget_exhausted'; sessionId: string }
-  | { type: 'vision_failed'; sessionId: string; aborted: boolean };
+  /** `code` is the adapter's error code when it is one of the known values, else `unknown`. */
+  | { type: 'vision_failed'; sessionId: string; aborted: boolean; code: 'invalid_frame' | 'busy' | 'timeout' | 'unknown' };

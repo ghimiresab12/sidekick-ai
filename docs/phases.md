@@ -127,3 +127,5 @@ and recorded verification; do not treat mock output as live Gemini or Chert proo
 - [x] Vision adapter (Prabin), using the existing `VisionPort`; controlled synthetic images tested with real Gemini. Real Chert frames still unverified. See `vision.md`.
 - [x] Optional `maxClockSkewMs` implemented in reasoning (0–5000 ms, default 0); coordinator adoption still pending with Sabik.
 - **Blocker:** a real Chert call must confirm whether the connection greeting is mandatory and whether screen share reaches the agent (the CH-2 proof).
+
+- [x] Gemini vision wired into the HTTP bridge behind `SIDEKICK_VISION=gemini` (milestone 3, 2026-11-15). Tested with mocked Gemini HTTP only; no live call, Chert frames or Python agent yet.

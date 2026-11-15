@@ -478,7 +478,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 **Status:**
 - **Implemented:** the authenticated localhost HTTP bridge (`src/bridge/http-bridge.ts`) and a runnable entrypoint (`npm run bridge`).
 - **Tested:** in-process HTTP tests against the real coordinator and engine, with Prabin's reasoning module on its **mock** provider and a **mock** `VisionPort`. The real entrypoint was also smoke-tested as a separate process.
-- **Not done:** no Python agent, Chert, live Gemini or UI traffic has gone through it. Prabin's Gemini vision adapter exists on `main` (`docs/vision.md`), but **the bridge entrypoint does not wire it in yet**, so frame uploads through `npm run bridge` return `503 vision_unavailable`.
+- **Not done:** no Python agent, Chert, live Gemini or UI traffic has gone through it. Prabin's Gemini vision adapter exists on `main` (`docs/vision.md`), and is wired into the bridge in milestone 3 (below), but only when `SIDEKICK_VISION=gemini` is set; by default, frame uploads return `503 vision_unavailable`.
 
 ### Security model
 
@@ -521,10 +521,10 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 | 413 | `payload_too_large` |
 | 415 | `unsupported_media_type` |
 | 422 | `timestamp_out_of_range` |
-| 429 | `observation_limit_reached` |
-| 502 | `vision_failed` |
+| 429 | `observation_limit_reached`, `vision_busy` (adapter-local concurrency limit, **not** provider rate limiting) |
+| 502 | `vision_failed` (provider HTTP errors including provider 429, invalid model output) |
 | 503 | `vision_unavailable` |
-| 504 | `vision_timeout` |
+| 504 | `vision_timeout` (bridge frame deadline, or the adapter's own timeout) |
 
 ### Capture metadata, timeouts and cancellation
 
@@ -543,7 +543,7 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 - **Port:** `SIDEKICK_BRIDGE_PORT` (default 8787).
 - **Reasoning:** `SIDEKICK_REASONING=mock` (default, labelled as a mock) or `gemini` (Prabin's adapter via `src/bridge/reasoning-wiring.mts`; requires `GEMINI_API_KEY` and `GEMINI_MODEL`, with **no fallback**).
 - **Fixed settings:** the coordinator uses `conditionFactKeys: ['leftZoneVisible', 'leftZoneUncovered']`, and `engine.sweepAll()` runs every 2 s.
-- **Vision:** none configured yet. Wiring `createGeminiVision` (per the handoff in `docs/vision.md`) is the next step and is not part of this milestone.
+- **Vision:** `SIDEKICK_VISION=none` (default) or `gemini`, which wires `createGeminiVision` in milestone 3 (below).
 - **Startup output:** URL, reasoning mode and vision status only, never tokens.
 
 ### Python adapter contract (for Damius — the agent is not modified in this milestone)
@@ -556,12 +556,52 @@ The Python LiveKit agent will POST normalized events to an authenticated localho
 6. **Frames:** `POST /v1/sessions/:id/frames` with the encoded JPEG, PNG or WebP bytes as the body (≤5 MiB) and the two `X-` headers.
    - Send from a background task or queue, never on the audio or call path.
    - Use a client timeout a little above the bridge's 10 s. That deadline counts **upload time too**, so send the complete encoded frame in one request, over the loopback connection.
-   - Keep **at most one frame in flight** and drop frames rather than queue them. Prabin's Gemini vision adapter accepts one request at a time and rejects extras as busy, which the bridge reports as `502 vision_failed`. The bridge's 10 s deadline is shorter than the adapter's own 15 s timeout, so the bridge deadline governs.
+   - Keep **at most one frame in flight** and drop frames rather than queue them. Prabin's Gemini vision adapter accepts one request at a time and rejects extras as busy, which the bridge reports as `429 vision_busy`. The bridge's 10 s deadline is shorter than the adapter's own 15 s timeout, so the bridge deadline governs.
    - Sample slower than vision plus reasoning latency.
 7. **Handling responses:**
    - `409 session_not_active`, `consent_required` or `aborted`: stop capturing and re-read capture state.
    - `409 stale_evidence` / `invalid_generation`: drop the item and refresh the generation.
-   - `503`, `502`, `504`: drop the frame and keep going, with no tight retry loop.
+   - `429 vision_busy`: a frame is already in vision. Drop this frame and send the next sampled one; don't retry it.
+   - `400 invalid_input` on a frame: the image bytes failed the format check (wrong MIME type, truncated, not an image). Fix the encoder; don't resend the same bytes.
+   - `503`, `502`, `504`: drop the frame and keep going, with no tight retry loop. A `502` can include Gemini's own rate limiting, so back off rather than resend immediately.
    - `401` / `403`: configuration error; stop.
    - Lifecycle and capture-state requests must carry **no body** (`400 unexpected_body` otherwise).
 8. **Never:** log or persist frames, audio, transcript text or tokens, and never publish audio into the call (see the requirements).
+
+## Integration milestone 3 — Gemini vision wired into the bridge (implemented 2026-11-15, mock-tested)
+
+**Status:**
+- **Implemented:** `SIDEKICK_VISION=gemini` connects Prabin's `createGeminiVision` adapter to the bridge through the coordinator's `VisionPort`.
+- **Tested:** end-to-end HTTP tests run the **production runtime** with Gemini HTTP **mocked** (Prabin's `mockVisionFetch` and `scenePng` fixtures). A network guard proves no real Gemini or other external call happened.
+- **Not done:** no live Gemini, Python agent, Chert or UI traffic has gone through this path.
+
+### Wiring
+
+- `src/bridge/runtime.ts`: `createBridgeRuntime(env, { fetchImpl?, frameTimeoutMs?, onRequestLog? })` builds config → reasoning wiring → vision wiring → coordinator → bridge. `main.ts` only listens and handles shutdown. `fetchImpl` can be injected from code (tests) only, never from the environment.
+- `src/bridge/vision-wiring.mts`: `createVision(mode, env, { timeoutMs, fetchImpl? })`.
+  - **`none` (default):** no adapter.
+  - **`gemini`:** `createGeminiVision({ apiKey: GEMINI_API_KEY, model: GEMINI_MODEL, profile: VISION_PROFILE, timeoutMs })`. Missing or invalid credentials stop startup (exit 1) with **no fallback**.
+  - **Facts:** `conditionFactKeys` is Prabin's exported `VISION_FACT_KEYS` (the same array, not a copy).
+- **Timeouts:** the adapter's `timeoutMs` is set to the bridge's `frameTimeoutMs` (10 s), so it never exceeds the bridge's single deadline, which covers upload and vision.
+- **Unchanged:** Prabin's adapter, prompt, schema and output validation, and `GEMINI_MODEL` (shared with reasoning; no separate vision model variable).
+
+### Vision error mapping (coordinator)
+
+`VisionPort` errors may carry a string `code`. Cancellation (pause, end, discard, client disconnect, bridge deadline) **always** yields `aborted` / the bridge's `504`, never a provider failure. This is enforced twice: the vision call is raced against the signal, and the error handler checks the signal before reading `code`.
+
+| Adapter `code` | Coordinator error | HTTP status |
+|---|---|---|
+| `invalid_frame` (bad signature, truncated, wrong MIME type) | `invalid_input` | 400 |
+| `busy` (adapter-local, one request at a time) | `vision_busy` | 429 |
+| `timeout` (adapter's own deadline) | `vision_timeout` | 504 |
+| `provider_error` (any provider HTTP error, **including provider 429**), `invalid_output`, other | `vision_failed` | 502 |
+
+### Environment
+
+`SIDEKICK_VISION` is optional: unset or empty means `none`; the only other accepted value is `gemini`. It requires the existing `GEMINI_API_KEY` and `GEMINI_MODEL`, and is independent of `SIDEKICK_REASONING` (default `mock`). The startup output shows `vision: Gemini vision (controlled-soccer-v1 profile only)` or `vision: not configured …`, never keys.
+
+### Limits
+
+- **Controlled scene only:** Gemini vision understands only the `controlled-soccer-v1` simulation (`docs/vision.md`), not arbitrary games.
+- **Billing and data:** with `SIDEKICK_VISION=gemini`, every accepted frame is sent to Google's API (billable).
+- **Not yet measured:** real latency, rate limits and accuracy.
