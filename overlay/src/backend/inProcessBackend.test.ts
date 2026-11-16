@@ -223,4 +223,49 @@ describe('in-process backend (real engine + coordinator + reasoning)', () => {
     await backend.startSession();
     expect(states.length).toBe(before);
   });
+
+  describe('resolution matches the bridge runtime (controlledSoccerResolution)', () => {
+    /** A fixed clock the test moves forward between steps, so each observation is strictly newer. */
+    async function cardWithCoveredStepNext() {
+      const clock = { t: Date.parse('2026-11-15T12:00:00.000Z') };
+      const feed = [
+        { source: 'transcript' as const, text: 'Alex is responsible for left defense.' },
+        { source: 'screen' as const, summary: 'Left zone uncovered.', facts: { leftZoneVisible: true, leftZoneUncovered: true } },
+        { source: 'screen' as const, summary: 'Left zone covered.', facts: { leftZoneVisible: true, leftZoneUncovered: false } },
+      ];
+      const ctx = connect({ now: () => new Date(clock.t), feed });
+      await ctx.backend.startSession();
+      const step = async () => {
+        clock.t += 2_000;
+        await ctx.backend.simulation!.advance();
+      };
+      await step(); // transcript
+      await step(); // uncovered → card
+      expect(ctx.last().prominent).toMatchObject({ status: 'active' });
+      return { ...ctx, step };
+    }
+
+    it('newer clear screen evidence that the zone is covered resolves the card', async () => {
+      const { backend, last, step } = await cardWithCoveredStepNext();
+      const id = last().prominent!.id;
+      await step(); // covered
+      expect(last().prominent).toBeUndefined();
+      expect(last().history[0]).toMatchObject({ id, status: 'resolved', canExplain: false });
+      const { events } = await backend.getTimeline();
+      expect(events.some((e) => e.type === 'recommendation_resolved')).toBe(true);
+    });
+
+    it('resolving the card being explained ends its voice request (recommendation_resolved)', async () => {
+      const { backend, last, step } = await cardWithCoveredStepNext();
+      const script = await backend.requestExplanation(last().prominent!.id);
+      await backend.reportVoiceStatus(script.request.id, 'playing_locally');
+      expect(last().activeVoiceRequest?.requestId).toBe(script.request.id);
+      await step(); // covered → resolved
+      expect(last().activeVoiceRequest).toBeUndefined(); // the overlay stops speech when it disappears
+      const { events } = await backend.getTimeline();
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'voice_finished', outcome: 'cancelled', cancelReason: 'recommendation_resolved' }),
+      );
+    });
+  });
 });

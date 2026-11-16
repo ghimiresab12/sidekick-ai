@@ -19,6 +19,7 @@ import { SidekickCoordinator } from '../../../src/coordinator/coordinator';
 import type { CoordinatorDiagnostic, ReasoningFn } from '../../../src/coordinator/ports';
 import { reason } from '../../../src/reasoning/reason.mts';
 import { createMockProvider } from '../../../src/adapters/model/mock.mts';
+import { controlledSoccerResolution } from '../../../src/recommendations/recommendation-rules';
 import type { Result } from '../../../src/contracts/types';
 import { buildExplanationText } from '../../../src/explanations/explanation-text';
 import { projectOverlayState, projectTimelineEvent, projectVoiceRequest } from '../../../src/privacy/browser-projection';
@@ -78,6 +79,8 @@ export function createInProcessBackend(options: InProcessOptions = {}): Sidekick
     reasoning: options.reasoning ?? ((request, signal) => reason(request, provider, { signal })),
     // engineering.md "Superseded condition evidence": the facts the MVP rule depends on.
     conditionFactKeys: ['leftZoneVisible', 'leftZoneUncovered'],
+    // Same resolution rule as the bridge runtime (src/bridge/runtime.ts), so both modes agree.
+    resolutionRule: controlledSoccerResolution,
     onDiagnostic: (d) => diagnostics.push(d),
     ...(options.now ? { now: options.now } : {}),
   });

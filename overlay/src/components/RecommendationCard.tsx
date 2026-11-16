@@ -10,13 +10,15 @@ interface Props {
   /** False while the connection is interrupted: the card may be out of date. */
   live: boolean;
   voice: VoiceApi;
+  /** `OverlayState.voiceBusy`, for the Explain hint. */
+  sessionVoiceBusy: boolean;
   dismissing: boolean;
   dismissDisabled: boolean;
   onDismiss: (id: string) => void;
 }
 
 /** The single card in the main slot (design.md §3–4). */
-export function RecommendationCard({ rec, live, voice, dismissing, dismissDisabled, onDismiss }: Props) {
+export function RecommendationCard({ rec, live, voice, sessionVoiceBusy, dismissing, dismissDisabled, onDismiss }: Props) {
   const titleId = `rec-${rec.id}-title`;
   const open = rec.status === 'active' || rec.status === 'stale';
   return (
@@ -52,7 +54,7 @@ export function RecommendationCard({ rec, live, voice, dismissing, dismissDisabl
         <EvidenceList items={rec.evidence} />
       </div>
 
-      <VoiceControls rec={rec} live={live} voice={voice} />
+      <VoiceControls rec={rec} live={live} voice={voice} sessionVoiceBusy={sessionVoiceBusy} />
 
       {open && (
         <div className="card-actions">
